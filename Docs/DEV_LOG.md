@@ -19,6 +19,52 @@ After each meaningful implementation task, update this file with:
 
 ---
 
+# 2026-09-02 — Phase 2.1 Capability Interface and Configured Registry
+
+## Objective
+
+Define a provider-neutral common capability interface and implement deterministic registration and lookup against external capability configuration.
+
+## What changed
+
+- Added the common `Capability` interface with:
+  - immutable metadata, capability kind, description, supported modalities, and JSON-schema-compatible input/output contracts;
+  - a guarded `invoke()` entry point that rejects requests for a different capability name;
+  - an abstract `execute()` method for future implementation-specific work.
+- Added `CapabilityRegistry`, which uses `CapabilityRegistryConfig` as the authority for:
+  - configured-definition listing;
+  - registration of enabled implementations;
+  - deterministic lookup and registered-list ordering;
+  - duplicate, unknown, disabled, and configuration-kind mismatch detection.
+- Kept concrete capabilities test-only; no Broker resolution/invocation implementation, model calls, tools, or service integrations were added.
+
+## Files changed
+
+- `aegis/capabilities/base.py`
+- `aegis/capabilities/registry.py`
+- `aegis/capabilities/__init__.py`
+- `tests/test_capabilities.py`
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 35 passed
+
+## Current status
+
+Phase 2.1 complete. Capability definitions remain externalized, and the registry is deterministic and safe to query before implementations exist.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 2.2 — Implement registry-backed `CapabilityBroker` resolution and invocation with mock-only capability implementations and graceful unknown/disabled results.
+
+---
+
 # 2026-09-02 — Phase 1.2 Workflow Definitions and Execution Controller
 
 ## Objective
