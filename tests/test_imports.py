@@ -5,6 +5,7 @@ import aegis.agent
 import aegis.audit
 import aegis.broker
 import aegis.capabilities
+import aegis.config
 import aegis.data
 import aegis.orchestration
 import aegis.router
@@ -24,6 +25,7 @@ def test_subpackages_importable():
     assert aegis.broker.__doc__
     assert aegis.router.__doc__
     assert aegis.capabilities.__doc__
+    assert aegis.config.__doc__
     assert aegis.skills.__doc__
     assert aegis.sessions.__doc__
     assert aegis.audit.__doc__

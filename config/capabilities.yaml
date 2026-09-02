@@ -1,0 +1,96 @@
+capabilities:
+  - name: extract_document
+    kind: tool
+    enabled: true
+    description: Deterministic document extraction entry point.
+    handler_key: document.extract
+    input_modalities:
+      - document
+  - name: inspect_spreadsheet
+    kind: tool
+    enabled: true
+    description: Deterministic spreadsheet inspection entry point.
+    handler_key: spreadsheet.inspect
+    input_modalities:
+      - spreadsheet
+  - name: ocr_document
+    kind: tool
+    enabled: true
+    description: Deterministic OCR entry point for scanned documents.
+    handler_key: document.ocr
+    input_modalities:
+      - document
+  - name: analyze_image
+    kind: model
+    enabled: true
+    description: Vision analysis capability routed through the vision model role.
+    model_role: vision
+    input_modalities:
+      - image
+  - name: search_knowledge
+    kind: knowledge
+    enabled: true
+    description: Local knowledge lookup capability.
+    handler_key: knowledge.search
+    input_modalities:
+      - document
+      - spreadsheet
+      - image
+  - name: draft_approval_note
+    kind: model
+    enabled: true
+    description: Draft approval-note content with the agent model role.
+    model_role: agent
+    input_modalities:
+      - document
+  - name: generate_code
+    kind: model
+    enabled: true
+    description: Generate code for deterministic sandbox execution.
+    model_role: coding
+    input_modalities:
+      - spreadsheet
+  - name: run_code
+    kind: tool
+    enabled: true
+    description: Execute generated code in a sandbox.
+    handler_key: sandbox.run
+    input_modalities:
+      - spreadsheet
+  - name: verify_result
+    kind: tool
+    enabled: true
+    description: Apply deterministic verification rules to outputs.
+    handler_key: verification.result
+    input_modalities:
+      - spreadsheet
+      - document
+      - image
+  - name: generate_word
+    kind: tool
+    enabled: true
+    description: Produce DOCX artifacts.
+    handler_key: artifact.word
+    input_modalities:
+      - document
+  - name: generate_excel
+    kind: tool
+    enabled: true
+    description: Produce spreadsheet artifacts.
+    handler_key: artifact.excel
+    input_modalities:
+      - spreadsheet
+  - name: generate_ppt
+    kind: tool
+    enabled: true
+    description: Produce presentation artifacts.
+    handler_key: artifact.ppt
+    input_modalities:
+      - document
+      - spreadsheet
+      - image
+  - name: finish
+    kind: control
+    enabled: true
+    description: Mark the workflow as ready to finish.
+    handler_key: workflow.finish

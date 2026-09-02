@@ -1,0 +1,36 @@
+providers:
+  - id: local_stub
+    kind: local
+    enabled: true
+    endpoint: http://localhost:11434/v1
+    timeout_seconds: 60
+  - id: temporary_api_stub
+    kind: api
+    enabled: false
+    endpoint: https://example.invalid/v1
+    timeout_seconds: 60
+
+models:
+  - id: agent_model_placeholder
+    provider: local_stub
+    roles:
+      - agent
+    enabled: true
+    context_window: 8192
+  - id: coding_model_placeholder
+    provider: local_stub
+    roles:
+      - coding
+    enabled: true
+    context_window: 8192
+  - id: vision_model_placeholder
+    provider: local_stub
+    roles:
+      - vision
+    enabled: true
+    context_window: 8192
+
+role_defaults:
+  agent: agent_model_placeholder
+  coding: coding_model_placeholder
+  vision: vision_model_placeholder

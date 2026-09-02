@@ -1,0 +1,24 @@
+name: aegis-agent
+description: General-purpose AEGIS prototype runtime agent.
+default_model_role: agent
+planning:
+  max_plan_steps: 8
+  max_observation_chars: 12000
+allowed_modalities:
+  - document
+  - spreadsheet
+  - image
+default_capabilities:
+  - extract_document
+  - inspect_spreadsheet
+  - ocr_document
+  - analyze_image
+  - search_knowledge
+  - draft_approval_note
+  - generate_code
+  - run_code
+  - verify_result
+  - generate_word
+  - generate_excel
+  - generate_ppt
+  - finish

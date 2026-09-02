@@ -19,6 +19,69 @@ After each meaningful implementation task, update this file with:
 
 ---
 
+# 2026-09-02 — Phase 0.2 Prototype Configuration Layer
+
+## Objective
+
+Implement the prototype configuration layer for agent settings, model registry, capability registry, and runtime settings while keeping configuration external to business logic.
+
+## What changed
+
+- Added a new `aegis.config` package with:
+  - validated configuration schemas for agent, model/provider registry, capability registry, and runtime settings;
+  - a small loader that reads external YAML or JSON files;
+  - argument/environment-based path overrides so configuration remains outside business logic.
+- Added repository default configuration files under `config/`:
+  - `agent.yaml`
+  - `models.yaml`
+  - `capabilities.yaml`
+  - `runtime.yaml`
+- Added lightweight validation for prototype invariants such as:
+  - unique provider/model/capability identifiers;
+  - valid model-role defaults;
+  - model capability vs non-model capability fields;
+  - sandbox networking remaining disabled;
+  - UI chain-of-thought remaining disabled;
+  - temporary API-provider enablement staying out of production mode.
+- Added tests for:
+  - loading repository defaults;
+  - JSON config override via environment path override;
+  - invalid runtime sandbox settings;
+  - duplicate capability detection.
+
+No Controller, Broker logic, Router logic, or real model/service integrations were added.
+
+## Files changed
+
+- `aegis/config/__init__.py`
+- `aegis/config/schemas.py`
+- `aegis/config/loader.py`
+- `config/agent.yaml`
+- `config/models.yaml`
+- `config/capabilities.yaml`
+- `config/runtime.yaml`
+- `tests/test_config.py`
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 7 passed
+
+## Current status
+
+Phase 0.2 complete. Prototype configuration is now externalized and validated, with placeholder-only model/provider metadata and no real integrations yet.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 1.1 — Implement a typed `TaskState` model and its deterministic state/limit fields, with focused tests and no Controller execution logic yet.
+
+---
+
 # 2026-09-02 — Phase 0.1 Repository Skeleton
 
 ## Objective

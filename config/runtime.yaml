@@ -1,0 +1,15 @@
+environment: development
+session_db_path: data/sessions.sqlite3
+audit_log_path: data/audit/events.jsonl
+artifacts_dir: artifacts
+sandbox:
+  enabled: true
+  network_enabled: false
+  container_runtime: docker
+controller:
+  max_retries: 2
+  max_iterations: 6
+ui:
+  stream_execution_events: true
+  show_chain_of_thought: false
+allow_temporary_api_provider: false
