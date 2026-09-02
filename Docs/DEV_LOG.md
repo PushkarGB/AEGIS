@@ -19,6 +19,57 @@ After each meaningful implementation task, update this file with:
 
 ---
 
+# 2026-09-02 — Phase 1.2 Workflow Definitions and Execution Controller
+
+## Objective
+
+Define legal state transitions for the computation, scanned-document approval-note, and multimodal-analysis workflows, then implement deterministic Controller governance without real capabilities.
+
+## What changed
+
+- Added declarative workflow graphs for all three prototype workflows with explicit start states, legal actions, success transitions, retry transitions, optional local knowledge lookup for approval notes, and an approval gate before scanned-document completion.
+- Added a minimal abstract `CapabilityBroker` boundary with `invoke(CapabilityRequest) -> CapabilityResult`; no capability resolution or concrete capability implementation was added.
+- Added `ExecutionController`, which:
+  - owns and updates one `TaskState`;
+  - validates Agent proposals against the selected workflow and terminal/approval rules;
+  - invokes only through the Broker boundary;
+  - records Broker and Controller observations plus high-level execution events;
+  - enforces bounded retry and iteration limits;
+  - transitions tasks to completed, failed, or cancelled states deterministically.
+- Added mock-Broker unit tests for legal and illegal workflow transitions, normal computation completion, invalid-action rejection, bounded failure, iteration-limit failure, and human approval before approval-note completion.
+
+No real capabilities, capability registry/resolution implementation, model routing, model calls, OCR, sandbox, or file-generation integration was added.
+
+## Files changed
+
+- `aegis/broker/broker.py`
+- `aegis/broker/__init__.py`
+- `aegis/orchestration/workflows.py`
+- `aegis/orchestration/controller.py`
+- `aegis/orchestration/__init__.py`
+- `tests/test_workflows.py`
+- `tests/test_controller.py`
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 30 passed
+
+## Current status
+
+Phase 1.2 complete. Workflows and Controller governance remain deterministic and independent of concrete capabilities.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 2.1 — Implement bounded capability registry and Broker resolution against the existing external capability configuration; retain mock-only capability implementations.
+
+---
+
 # 2026-09-02 — Phase 1.1 TaskState Serialization Coverage
 
 ## Objective

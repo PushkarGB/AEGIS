@@ -14,6 +14,8 @@ import aegis.sessions
 import aegis.skills
 import aegis.schemas
 from aegis.router.provider import ModelGenerationRequest, ModelGenerationResult, ModelProvider
+from aegis.broker import CapabilityBroker
+from aegis.orchestration import ExecutionController, WorkflowName
 
 
 def test_package_version():
@@ -40,3 +42,9 @@ def test_model_provider_interface_is_importable():
     assert ModelProvider.__name__ == "ModelProvider"
     assert ModelGenerationRequest.__name__ == "ModelGenerationRequest"
     assert ModelGenerationResult.__name__ == "ModelGenerationResult"
+
+
+def test_orchestration_and_broker_interfaces_are_importable():
+    assert CapabilityBroker.__name__ == "CapabilityBroker"
+    assert ExecutionController.__name__ == "ExecutionController"
+    assert WorkflowName.COMPUTATION == "computation"
