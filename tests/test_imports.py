@@ -13,7 +13,7 @@ import aegis.security
 import aegis.sessions
 import aegis.skills
 import aegis.schemas
-from aegis.router.provider import ModelProvider
+from aegis.router.provider import ModelGenerationRequest, ModelGenerationResult, ModelProvider
 
 
 def test_package_version():
@@ -38,3 +38,5 @@ def test_subpackages_importable():
 def test_model_provider_interface_is_importable():
     assert issubclass(ModelProvider, object)
     assert ModelProvider.__name__ == "ModelProvider"
+    assert ModelGenerationRequest.__name__ == "ModelGenerationRequest"
+    assert ModelGenerationResult.__name__ == "ModelGenerationResult"

@@ -19,6 +19,48 @@ After each meaningful implementation task, update this file with:
 
 ---
 
+# 2026-09-02 — Phase 0.4 Provider-Neutral ModelProvider Interface
+
+## Objective
+
+Define the smallest model-generation contract shared by future local, temporary API, and mock providers without implementing connectivity.
+
+## What changed
+
+- Replaced the placeholder `ModelProvider` with one abstract synchronous method:
+  - `generate(ModelGenerationRequest) -> ModelGenerationResult`
+- Added strict, immutable provider-neutral request and result models containing only model selection, prompt input, optional system prompt, and generated text.
+- Exported the interface and value objects from `aegis.router`.
+- Added a test-only in-memory mock provider proving a caller can use the abstract `ModelProvider` type without local-runtime or API-specific dependencies.
+
+No Ollama adapter, HTTP/API client, Router behavior, Agent integration, Controller integration, or Broker integration was added.
+
+## Files changed
+
+- `aegis/router/provider.py`
+- `aegis/router/__init__.py`
+- `tests/test_model_provider.py`
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 20 passed
+
+## Current status
+
+Phase 0.4 complete. Model consumers can now depend on a stable abstraction rather than any concrete provider.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 1.2 — Define deterministic Controller workflow/state transitions using `TaskState`; do not add capability or model integrations yet.
+
+---
+
 # 2026-09-02 — Phase 0.3 Provider-Neutral Shared Schemas
 
 ## Objective
