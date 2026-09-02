@@ -19,6 +19,51 @@ After each meaningful implementation task, update this file with:
 
 ---
 
+# 2026-09-02 — Phase 0.3 Provider-Neutral Shared Schemas
+
+## Objective
+
+Define the prototype's core shared data contracts without adding Controller, Broker, provider, or workflow behavior.
+
+## What changed
+
+- Added `aegis.schemas` with strict, JSON-serializable Pydantic models for:
+  - `TaskState`
+  - `AgentDecision`
+  - `CapabilityRequest`
+  - `CapabilityResult`
+  - `Observation`
+  - `Artifact`
+  - `VerificationResult`
+- Added typed status enums for capability results, verification, approval, and terminal task state.
+- Kept all schemas provider- and implementation-neutral: payloads are JSON objects; artifacts are local references; the Agent only proposes structured actions; no execution is performed.
+- Added structural validation for timezone-aware timestamps, bounded task retry/iteration counts, duplicate state records, strict fields, and consistent capability-result errors.
+
+## Files changed
+
+- `aegis/schemas.py`
+- `tests/test_schemas.py`
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 14 passed
+
+## Current status
+
+Phase 0.3 complete. The state model intentionally contains no Controller transition or execution logic.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 1.2 — Define deterministic workflow/state transitions in the Execution Controller using `TaskState`; do not add model or capability integrations yet.
+
+---
+
 # 2026-09-02 — Phase 0.2 Prototype Configuration Layer
 
 ## Objective

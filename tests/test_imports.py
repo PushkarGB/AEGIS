@@ -12,6 +12,7 @@ import aegis.router
 import aegis.security
 import aegis.sessions
 import aegis.skills
+import aegis.schemas
 from aegis.router.provider import ModelProvider
 
 
@@ -31,6 +32,7 @@ def test_subpackages_importable():
     assert aegis.audit.__doc__
     assert aegis.security.__doc__
     assert aegis.data.__doc__
+    assert aegis.schemas.__doc__
 
 
 def test_model_provider_interface_is_importable():
