@@ -1,0 +1,29 @@
+# Core runtime
+gradio
+pydantic
+pyyaml
+
+# Local model / HTTP client abstraction
+requests
+
+# Document processing
+pymupdf
+pytesseract
+Pillow
+
+# Office/document generation
+openpyxl
+python-docx
+python-pptx
+
+# Session/audit utilities
+# SQLite is provided by Python's standard library.
+
+# Runtime/system inspection
+psutil
+
+# Testing
+pytest
+
+# Optional development helpers
+python-dotenv
