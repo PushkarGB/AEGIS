@@ -19,6 +19,59 @@ After each meaningful implementation task, update this file with:
 
 ---
 
+# 2026-09-02 — Phase 0.1 Repository Skeleton
+
+## Objective
+
+Create the initial Python package layout and pytest import checks. No runtime behavior.
+
+## What changed
+
+- Added the `aegis` package with empty subpackages: `agent`, `orchestration`, `broker`, `router`, `capabilities`, `skills`, `sessions`, `audit`, `security`, `data`.
+- Added a placeholder `ModelProvider` ABC at `aegis/router/provider.py` (no generate/chat methods yet).
+- Added `pyproject.toml` for package discovery and pytest `pythonpath`.
+- Added a root `requirements.txt` that includes `Docs/requirements.txt`.
+- Added `tests/test_imports.py` (package version, subpackage imports, provider placeholder).
+
+No Agent loop, Controller, Broker resolution, routing, LLMs, Ollama, APIs, OCR, Docker, or Gradio.
+
+## Files changed
+
+- `aegis/__init__.py`
+- `aegis/agent/__init__.py`
+- `aegis/orchestration/__init__.py`
+- `aegis/broker/__init__.py`
+- `aegis/router/__init__.py`
+- `aegis/router/provider.py`
+- `aegis/capabilities/__init__.py`
+- `aegis/skills/__init__.py`
+- `aegis/sessions/__init__.py`
+- `aegis/audit/__init__.py`
+- `aegis/security/__init__.py`
+- `aegis/data/__init__.py`
+- `tests/test_imports.py`
+- `pyproject.toml`
+- `requirements.txt` (root include of `Docs/requirements.txt`)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q` → 3 passed
+
+## Current status
+
+Phase 0.1 complete. Packages exist and import. Interfaces are placeholders only.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 0.2 — Add configuration loading (environment/config files; no Colab-specific business logic; provider settings stay outside business logic).
+
+---
+
 # 2026-09-02 — Project Baseline
 
 ## Objective
