@@ -19,6 +19,42 @@ After each meaningful implementation task, update this file with:
 
 ---
 
+# 2026-09-02 — Phase 1.1 TaskState Serialization Coverage
+
+## Objective
+
+Confirm the existing controller-owned `TaskState` contract covers the authoritative fields specified in the architecture and serialize each field as a stable JSON-compatible record.
+
+## What changed
+
+- Confirmed `TaskState` already contains the complete documented state shape: session identity, goal, attachments, intent/modality, selected skill, plan/step progress, observations, artifacts, verification, bounded retries/iterations, approval, and final status.
+- Expanded the TaskState serialization round-trip test to populate and assert every authoritative field explicitly.
+
+No Controller execution or transition behavior was added.
+
+## Files changed
+
+- `tests/test_schemas.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 20 passed
+
+## Current status
+
+TaskState is implemented as a strict provider-neutral shared schema and is ready for deterministic Controller transition work.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 1.2 — Define deterministic Controller workflow/state transitions using `TaskState`; do not add capability or model integrations yet.
+
+---
+
 # 2026-09-02 — Phase 0.4 Provider-Neutral ModelProvider Interface
 
 ## Objective
