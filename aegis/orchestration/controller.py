@@ -62,6 +62,8 @@ class ExecutionController:
         )
         self._broker = broker
         self._events: list[ExecutionEvent] = []
+        self.last_action: str | None = None
+        self.last_capability_result: CapabilityResult | None = None
 
         if self.state.final_status != FinalStatus.NOT_FINAL:
             raise ValueError("ExecutionController requires a non-terminal TaskState")
@@ -79,6 +81,41 @@ class ExecutionController:
         """Expose the ordered, high-level event stream for this task."""
 
         return tuple(self._events)
+
+    def observation_for_agent(self) -> Observation:
+        """Return the latest capability observation for Agent reasoning.
+
+        Exposes the domain/capability observation rather than internal
+        Controller governance wrappers so the Agent reasons on real outputs.
+        """
+        if self.last_capability_result is not None and self.last_capability_result.observations:
+            return self.last_capability_result.observations[-1]
+
+        for observation in reversed(self.state.observations):
+            if observation.source != "execution_controller":
+                return observation
+
+        if self.state.observations:
+            return self.state.observations[-1]
+
+        return Observation(
+            source="execution_controller",
+            kind="task_initialized",
+            summary=self.state.user_goal,
+            data={"current_step": self.state.current_step},
+        )
+
+    def allowed_next_actions(self) -> tuple[str, ...]:
+        """Return legal capability actions from the current workflow state."""
+        if self.state.final_status != FinalStatus.NOT_FINAL:
+            return ()
+        return tuple(
+            sorted(
+                self.workflow.allowed_actions(
+                    self.state.current_step, self.state.approval_status
+                )
+            )
+        )
 
     def execute(self, decision: AgentDecision) -> ExecutionEvent:
         """Validate and execute one Agent proposal through the Broker boundary."""
@@ -108,6 +145,7 @@ class ExecutionController:
             task_id=self.state.session_id,
         )
         self.state.iteration_count += 1
+        self.last_action = decision.action
         self._emit(
             ExecutionEventKind.ACTION_STARTED,
             f"Invoking {decision.action} through the Capability Broker.",
@@ -130,6 +168,7 @@ class ExecutionController:
                 error="Capability Broker returned a result for a different request.",
             )
 
+        self.last_capability_result = result
         self.state.observations.extend(result.observations)
         self.state.generated_artifacts.extend(result.artifacts)
 

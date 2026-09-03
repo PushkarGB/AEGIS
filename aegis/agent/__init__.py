@@ -7,6 +7,10 @@ from .runtime import (
     AgentRuntimeError,
     RouterAgentRuntime,
 )
+from .sandbox_feedback import (
+    SandboxObservationLoop,
+    SandboxRecoveryResult,
+)
 from .schemas import (
     AgentDirective,
     AgentIntent,
@@ -41,5 +45,7 @@ __all__ = [
     "PlanProposal",
     "PreviousExecutionContext",
     "RouterAgentRuntime",
+    "SandboxObservationLoop",
+    "SandboxRecoveryResult",
     "workflow_for_intent",
 ]
