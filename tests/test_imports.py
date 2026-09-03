@@ -41,7 +41,13 @@ from aegis.router import (
     TemporaryAPIProviderDisabledError,
 )
 from aegis.broker import CapabilityBroker, RegistryCapabilityBroker
-from aegis.capabilities import Capability, CapabilityRegistry
+from aegis.capabilities import (
+    Capability,
+    CapabilityRegistry,
+    InspectSpreadsheetCapability,
+    WorkbookInspection,
+    inspect_spreadsheet,
+)
 from aegis.orchestration import ExecutionController, WorkflowName
 
 
@@ -82,6 +88,9 @@ def test_orchestration_and_broker_interfaces_are_importable():
     assert RegistryCapabilityBroker.__name__ == "RegistryCapabilityBroker"
     assert Capability.__name__ == "Capability"
     assert CapabilityRegistry.__name__ == "CapabilityRegistry"
+    assert InspectSpreadsheetCapability.__name__ == "InspectSpreadsheetCapability"
+    assert WorkbookInspection.__name__ == "WorkbookInspection"
+    assert callable(inspect_spreadsheet)
     assert ExecutionController.__name__ == "ExecutionController"
     assert WorkflowName.COMPUTATION == "computation"
 

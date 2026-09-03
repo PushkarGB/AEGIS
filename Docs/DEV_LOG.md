@@ -18,6 +18,56 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 6.1 Deterministic Spreadsheet Inspection (inspect_spreadsheet)
+
+
+## Objective
+
+Implement the deterministic `inspect_spreadsheet` capability using `openpyxl` to extract structured workbook information (sheet schemas, column definitions, data row counts, representative sample values, numeric field identification, and basic workbook metadata) without delegating parsing to an LLM.
+
+## What changed
+
+- Added `aegis/capabilities/inspect_spreadsheet.py` implementing:
+  - `inspect_spreadsheet(file_path, max_sample_values=5, max_preview_rows=5) -> WorkbookInspection`: deterministic workbook inspection using `openpyxl` with cached-formula support (`data_only=True`), column type inference, numeric min/max calculations, deduplicated header resolution, fallback column naming for blank headers, and empty-sheet handling.
+  - Strict Pydantic models for structured output: `ColumnInfo`, `SheetInfo`, `WorkbookMetadata`, and `WorkbookInspection`.
+  - `InspectSpreadsheetCapability`: concrete `Capability` implementation (`kind=CapabilityKind.TOOL`, `input_modalities=("spreadsheet",)`) that executes `CapabilityRequest`, validates file presence, extracts structured metadata, and returns `CapabilityResult` with a descriptive `Observation`.
+- Exported `InspectSpreadsheetCapability`, `inspect_spreadsheet`, `WorkbookInspection`, `SheetInfo`, `ColumnInfo`, and `WorkbookMetadata` from `aegis.capabilities`.
+- Added a comprehensive test suite in `tests/test_inspect_spreadsheet.py` (12 tests) using synthetic multi-sheet workbooks to verify:
+  - structured workbook metadata, sheets, columns, row counts, and active sheet detection;
+  - per-column type inference (string, datetime, float, integer, boolean, empty), numeric detection, null counts, min/max statistics, and representative values;
+  - multi-sheet and empty-sheet handling;
+  - edge cases (duplicate headers, unnamed/blank header cells, header-only sheets);
+  - error handling for missing and non-Excel files;
+  - capability execution via `CapabilityRequest`, flexible input key resolution (`workbook`, `file_path`, `path`), `CapabilityRegistry` registration, `RegistryCapabilityBroker` resolution, and integration with `ExecutionController` in the computation workflow.
+- Updated `tests/test_imports.py` to verify importability and callable contracts for `InspectSpreadsheetCapability`, `WorkbookInspection`, and `inspect_spreadsheet`.
+
+## Files changed
+
+- `aegis/capabilities/inspect_spreadsheet.py` (new)
+- `aegis/capabilities/__init__.py`
+- `tests/test_inspect_spreadsheet.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_inspect_spreadsheet.py -v -p no:cacheprovider` → 12 passed
+- `python -m pytest tests -q -p no:cacheprovider` → 192 passed
+- `python -m compileall aegis tests` → passed
+
+## Current status
+
+Complete. `inspect_spreadsheet` provides deterministic, structured spreadsheet inspection using `openpyxl` with zero LLM dependence and full Broker/Controller integration.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 6.2 — Implement the code generation and execution components for Workflow B (`generate_code` prompt construction with coding model, and sandbox execution interface).
+
+---
 # 2026-09-03 — Phase 5.2 Agent Behavioral Tests with MockModelProvider
 
 ## Objective
