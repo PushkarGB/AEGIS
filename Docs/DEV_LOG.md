@@ -18,6 +18,52 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Repository Git Initialization and Commit History Baseline
+
+## Objective
+
+Initialize git version control in the AEGIS repository, configure repository ignore rules, and establish an authentic task-by-task, phase-by-phase commit history reflecting all development stages through Phase 2.2.
+
+## What changed
+
+- Initialized Git repository on the `main` branch.
+- Added root `.gitignore` ignoring bytecode, pytest caches, build artifacts, and virtual environments.
+- Systematically created atomic, verified commits corresponding chronologically to every completed project phase:
+  - Baseline documentation (`Docs/ARCHITECTURE.md`, `Docs/README.md`, `Docs/requirements.txt`)
+  - Phase 0.1 Repository Skeleton
+  - Phase 0.2 Prototype Configuration Layer
+  - Phase 0.3 Provider-Neutral Shared Schemas
+  - Phase 0.4 Provider-Neutral ModelProvider Interface
+  - Phase 1.1 TaskState Serialization Coverage
+  - Phase 1.2 Workflow Definitions and Execution Controller
+  - Phase 2.1 Capability Interface and Configured Registry
+  - Phase 2.2 Registry-Backed Capability Broker
+- Verified that all pytest checks passed at every historical commit point and that the final tree matches the complete Phase 2.2 working implementation.
+
+## Files changed
+
+- `.gitignore`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 40 passed
+- `git status` → clean working tree
+- `git log --oneline` → verified sequential commit history
+
+## Current status
+
+Git version control is initialized and fully up to date with the Phase 2.2 codebase. Repository history is cleanly partitioned and matches engineering documentation.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 3.1 — Implement deterministic model registry access and Router selection from external model configuration; retain mock-only provider implementations.
+
+---
 
 # 2026-09-03 — Phase 2.2 Registry-Backed Capability Broker
 
@@ -692,3 +738,4 @@ When switching from Codex → Cursor → Antigravity or vice versa:
 **Phase 3.1 — Implement deterministic model registry access and Router selection.**
 
 The next coding agent must read `ARCHITECTURE.md`, `DEV_LOG.md`, the external model configuration, `ModelProvider` interface, capability metadata, and existing tests; implement deterministic model-role selection and explainable routing without concrete model connectivity; retain mock-only provider implementations; preserve Controller/Broker boundaries; update this file; and stop after this task.
+
