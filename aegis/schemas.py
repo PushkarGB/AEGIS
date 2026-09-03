@@ -194,6 +194,8 @@ class TaskState(SharedSchema):
     """Controller-owned task record without Controller execution behavior."""
 
     session_id: UUID = Field(default_factory=uuid4)
+    task_id: UUID = Field(default_factory=uuid4)
+    user_id: str | None = Field(default=None, min_length=1)
     user_goal: NonEmptyText
     attachments: list[str] = Field(default_factory=list)
     intent: str | None = Field(default=None, min_length=1)

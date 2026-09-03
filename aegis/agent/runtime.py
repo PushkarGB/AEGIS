@@ -9,6 +9,13 @@ from typing import TypeVar
 from pydantic import BaseModel, ValidationError
 
 from aegis.config import AgentConfig
+from aegis.events import (
+    ExecutionEvent,
+    ExecutionEventContext,
+    ExecutionEventPublisher,
+    ExecutionEventStatus,
+    ExecutionEventType,
+)
 from aegis.router import ModelGenerationRequest, ModelProvider, ModelRouter, RoutingDecision
 
 from .schemas import (
@@ -63,10 +70,12 @@ class RouterAgentRuntime(AgentRuntime):
         config: AgentConfig,
         router: ModelRouter,
         providers: dict[str, ModelProvider],
+        event_publisher: ExecutionEventPublisher | None = None,
     ) -> None:
         self._config = config
         self._router = router
         self._providers = dict(providers)
+        self._event_publisher = event_publisher
 
     def decide_intent(self, request: IntentAnalysisRequest) -> IntentAnalysisResult:
         result = self._generate_structured(
@@ -81,12 +90,20 @@ class RouterAgentRuntime(AgentRuntime):
                 "spreadsheet for workbook-style/tabular inputs, and image for photo-based visual analysis."
             ),
             payload=request,
+            event_context=request.event_context,
         )
 
         if result.modality.value not in set(self._config.allowed_modalities):
             raise AgentModelResponseError(
                 f"Model selected unsupported modality '{result.modality.value}'."
             )
+        self._emit(
+            request.event_context,
+            ExecutionEventType.INTENT_IDENTIFIED,
+            ExecutionEventStatus.COMPLETED,
+            result.summary,
+            metadata={"intent": result.intent.value, "modality": result.modality.value},
+        )
         return result
 
     def generate_plan(self, request: PlanGenerationRequest) -> PlanProposal:
@@ -101,6 +118,7 @@ class RouterAgentRuntime(AgentRuntime):
                 "and do not invent tool calls or execution side effects."
             ),
             payload=request,
+            event_context=request.event_context,
         )
         self._validate_plan(result, request)
         return result
@@ -120,6 +138,11 @@ class RouterAgentRuntime(AgentRuntime):
                 "verify only for verify_result, and finish only for action finish with done=true."
             ),
             payload=request,
+            event_context=ExecutionEventContext(
+                session_id=request.task_state.session_id,
+                task_id=request.task_state.task_id,
+                user_id=request.task_state.user_id,
+            ),
         )
         self._validate_observation_decision(result, request)
         return result
@@ -133,11 +156,21 @@ class RouterAgentRuntime(AgentRuntime):
         response_model: type[_MODEL_RESPONSE],
         instruction: str,
         payload: BaseModel,
+        event_context: ExecutionEventContext | None,
     ) -> _MODEL_RESPONSE:
         routing = self._router.route(
             task_type,
             modality=modality_hint,
             required_capability=required_capability,
+        )
+        self._emit(
+            event_context,
+            ExecutionEventType.MODEL_SELECTED,
+            ExecutionEventStatus.COMPLETED,
+            f"Selected model {routing.model_id} for {task_type}.",
+            model_id=routing.model_id,
+            model_provider_id=routing.provider_id,
+            metadata={"role": routing.role, "routing_reason": routing.reason},
         )
         provider = self._resolve_provider(routing)
         request = ModelGenerationRequest(
@@ -145,8 +178,55 @@ class RouterAgentRuntime(AgentRuntime):
             system_prompt=self._system_prompt(response_model),
             prompt=self._user_prompt(instruction, payload, response_model),
         )
-        result = provider.generate(request)
+        try:
+            result = provider.generate(request)
+        except Exception:
+            self._emit(
+                event_context,
+                ExecutionEventType.MODEL_INVOKED,
+                ExecutionEventStatus.FAILED,
+                f"Model invocation failed for {routing.model_id}.",
+                model_id=routing.model_id,
+                model_provider_id=routing.provider_id,
+            )
+            raise
+        self._emit(
+            event_context,
+            ExecutionEventType.MODEL_INVOKED,
+            ExecutionEventStatus.COMPLETED,
+            f"Model invocation completed for {routing.model_id}.",
+            model_id=routing.model_id,
+            model_provider_id=routing.provider_id,
+        )
         return self._parse_structured_response(response_model, result.text)
+
+    def _emit(
+        self,
+        context: ExecutionEventContext | None,
+        event_type: ExecutionEventType,
+        status: ExecutionEventStatus,
+        summary: str,
+        *,
+        model_id: str | None = None,
+        model_provider_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        if self._event_publisher is None or context is None:
+            return
+        self._event_publisher.publish(
+            ExecutionEvent(
+                session_id=context.session_id,
+                task_id=context.task_id,
+                user_id=context.user_id,
+                event_type=event_type,
+                component="agent_runtime",
+                status=status,
+                summary=summary,
+                model_id=model_id,
+                model_provider_id=model_provider_id,
+                metadata=metadata or {},
+            )
+        )
 
     def _resolve_provider(self, routing: RoutingDecision) -> ModelProvider:
         provider = self._providers.get(routing.provider_id)

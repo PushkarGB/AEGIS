@@ -564,7 +564,7 @@ def test_full_workflow_execution_with_provider_substitution(
 
     # Verify Controller emitted expected event progression
     event_kinds = [event.kind for event in controller.execution_events]
-    assert event_kinds[0] == ExecutionEventKind.ACTION_STARTED
+    assert event_kinds[0] == ExecutionEventKind.TASK_STARTED
     assert event_kinds[-1] == ExecutionEventKind.TASK_COMPLETED
     assert ExecutionEventKind.TASK_COMPLETED in event_kinds
 
@@ -837,10 +837,10 @@ def test_provider_connection_failure_leaves_controller_state_uncorrupted():
     with pytest.raises(ModelProviderConnectionError, match="Could not reach provider endpoint"):
         agent.propose_next_action(state)
 
-    # Controller state was NOT corrupted: still at start step, 0 events emitted, not terminal
+    # Controller state was NOT corrupted: still at start step, only initialization events, not terminal
     assert state.current_step == "inspect"
     assert state.final_status == FinalStatus.NOT_FINAL
-    assert len(controller.execution_events) == 0
+    assert len(controller.execution_events) == 2
 
 
 def test_temporary_api_policy_enforced_before_controller_execution():

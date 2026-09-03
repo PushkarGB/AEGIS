@@ -6,6 +6,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
+from aegis.events import ExecutionEventContext
 from aegis.orchestration import WorkflowName
 from aegis.schemas import AgentDecision, CapabilityResultStatus, Observation, TaskState
 
@@ -90,6 +91,7 @@ class IntentAnalysisRequest(AgentSchema):
 
     user_goal: str = Field(min_length=1)
     attachments: list[AttachmentDescriptor] = Field(default_factory=list)
+    event_context: ExecutionEventContext | None = None
 
 
 class IntentAnalysisResult(AgentSchema):
@@ -126,6 +128,7 @@ class PlanGenerationRequest(AgentSchema):
     intent: AgentIntent
     modality: InputModality
     available_capabilities: list[str] = Field(min_length=1)
+    event_context: ExecutionEventContext | None = None
 
     @field_validator("available_capabilities")
     @classmethod

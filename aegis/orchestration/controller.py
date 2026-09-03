@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import StrEnum
-
 from aegis.broker import CapabilityBroker
+from aegis.events import (
+    ExecutionEvent,
+    ExecutionEventPublisher,
+    ExecutionEventStatus,
+    ExecutionEventType,
+)
 from aegis.schemas import (
     AgentDecision,
     ApprovalStatus,
@@ -23,28 +25,29 @@ from aegis.schemas import (
 from .workflows import WorkflowDefinition, WorkflowName, get_workflow
 
 
-class ExecutionEventKind(StrEnum):
-    """High-level events safe to expose in the execution UI."""
+class ExecutionEventKind:
+    """Compatibility names; prefer :class:`ExecutionEventType` for new code."""
 
-    ACTION_STARTED = "action_started"
-    ACTION_COMPLETED = "action_completed"
-    ACTION_FAILED = "action_failed"
-    ACTION_REJECTED = "action_rejected"
-    APPROVAL_RECORDED = "approval_recorded"
-    LIMIT_EXCEEDED = "limit_exceeded"
-    TASK_COMPLETED = "task_completed"
-    TASK_FAILED = "task_failed"
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutionEvent:
-    """A concise Controller event without model reasoning or chain-of-thought."""
-
-    sequence: int
-    kind: ExecutionEventKind
-    summary: str
-    action: str | None = None
-    occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    TASK_STARTED = ExecutionEventType.TASK_STARTED
+    INTENT_IDENTIFIED = ExecutionEventType.INTENT_IDENTIFIED
+    WORKFLOW_SELECTED = ExecutionEventType.WORKFLOW_SELECTED
+    CAPABILITY_STARTED = ExecutionEventType.CAPABILITY_STARTED
+    CAPABILITY_COMPLETED = ExecutionEventType.CAPABILITY_COMPLETED
+    MODEL_SELECTED = ExecutionEventType.MODEL_SELECTED
+    MODEL_INVOKED = ExecutionEventType.MODEL_INVOKED
+    SANDBOX_STARTED = ExecutionEventType.SANDBOX_STARTED
+    SANDBOX_COMPLETED = ExecutionEventType.SANDBOX_COMPLETED
+    VERIFICATION_STARTED = ExecutionEventType.VERIFICATION_STARTED
+    VERIFICATION_COMPLETED = ExecutionEventType.VERIFICATION_COMPLETED
+    HITL_REQUIRED = ExecutionEventType.HITL_REQUIRED
+    ACTION_STARTED = ExecutionEventType.CAPABILITY_STARTED
+    ACTION_COMPLETED = ExecutionEventType.CAPABILITY_COMPLETED
+    ACTION_FAILED = ExecutionEventType.CAPABILITY_COMPLETED
+    ACTION_REJECTED = ExecutionEventType.CAPABILITY_REJECTED
+    APPROVAL_RECORDED = ExecutionEventType.APPROVAL_RECORDED
+    LIMIT_EXCEEDED = ExecutionEventType.LIMIT_EXCEEDED
+    TASK_COMPLETED = ExecutionEventType.TASK_COMPLETED
+    TASK_FAILED = ExecutionEventType.TASK_FAILED
 
 
 class ExecutionController:
@@ -55,13 +58,14 @@ class ExecutionController:
         state: TaskState,
         workflow: WorkflowName | str | WorkflowDefinition,
         broker: CapabilityBroker,
+        event_publisher: ExecutionEventPublisher | None = None,
     ) -> None:
         self.state = state
         self.workflow = (
             workflow if isinstance(workflow, WorkflowDefinition) else get_workflow(workflow)
         )
         self._broker = broker
-        self._events: list[ExecutionEvent] = []
+        self._event_publisher = event_publisher or ExecutionEventPublisher()
         self.last_action: str | None = None
         self.last_capability_result: CapabilityResult | None = None
 
@@ -75,12 +79,22 @@ class ExecutionController:
             self.state.current_step = self.workflow.start_state
         if self.workflow.requires_approval and self.state.approval_status == ApprovalStatus.NOT_REQUIRED:
             self.state.approval_status = ApprovalStatus.PENDING
+        self._emit(
+            ExecutionEventType.TASK_STARTED,
+            ExecutionEventStatus.STARTED,
+            "Task execution started.",
+        )
+        self._emit(
+            ExecutionEventType.WORKFLOW_SELECTED,
+            ExecutionEventStatus.COMPLETED,
+            f"Selected {self.workflow.name.value} workflow.",
+        )
 
     @property
     def execution_events(self) -> tuple[ExecutionEvent, ...]:
         """Expose the ordered, high-level event stream for this task."""
 
-        return tuple(self._events)
+        return self._event_publisher.events
 
     def observation_for_agent(self) -> Observation:
         """Return the latest capability observation for Agent reasoning.
@@ -123,9 +137,10 @@ class ExecutionController:
         rejection_reason = self._rejection_reason(decision)
         if rejection_reason:
             return self._emit(
-                ExecutionEventKind.ACTION_REJECTED,
+                ExecutionEventType.CAPABILITY_REJECTED,
+                ExecutionEventStatus.REJECTED,
                 rejection_reason,
-                decision.action,
+                capability_id=decision.action,
             )
 
         if self.state.iteration_count >= self.state.max_iterations:
@@ -133,11 +148,14 @@ class ExecutionController:
             self._record_controller_observation(
                 "iteration_limit", "Iteration limit exhausted before capability invocation.", decision.action
             )
-            return self._emit(
-                ExecutionEventKind.LIMIT_EXCEEDED,
+            limit_event = self._emit(
+                ExecutionEventType.LIMIT_EXCEEDED,
+                ExecutionEventStatus.FAILED,
                 "Iteration limit exhausted; task failed.",
-                decision.action,
+                capability_id=decision.action,
             )
+            self._emit_task_failed("Task failed after exhausting its iteration limit.")
+            return limit_event
 
         request = CapabilityRequest(
             capability_name=decision.action,
@@ -147,10 +165,28 @@ class ExecutionController:
         self.state.iteration_count += 1
         self.last_action = decision.action
         self._emit(
-            ExecutionEventKind.ACTION_STARTED,
+            ExecutionEventType.CAPABILITY_STARTED,
+            ExecutionEventStatus.STARTED,
             f"Invoking {decision.action} through the Capability Broker.",
-            decision.action,
+            capability_id=decision.action,
+            request_id=request.request_id,
         )
+        if decision.action == "run_code":
+            self._emit(
+                ExecutionEventType.SANDBOX_STARTED,
+                ExecutionEventStatus.STARTED,
+                "Sandbox execution started.",
+                capability_id=decision.action,
+                request_id=request.request_id,
+            )
+        elif decision.action == "verify_result":
+            self._emit(
+                ExecutionEventType.VERIFICATION_STARTED,
+                ExecutionEventStatus.STARTED,
+                "Verification started.",
+                capability_id=decision.action,
+                request_id=request.request_id,
+            )
 
         try:
             result = self._broker.invoke(request)
@@ -181,24 +217,28 @@ class ExecutionController:
 
         if not self.workflow.requires_approval:
             return self._emit(
-                ExecutionEventKind.ACTION_REJECTED,
+                ExecutionEventType.CAPABILITY_REJECTED,
+                ExecutionEventStatus.REJECTED,
                 "This workflow does not require human approval.",
             )
         if self.state.final_status != FinalStatus.NOT_FINAL:
             return self._emit(
-                ExecutionEventKind.ACTION_REJECTED,
+                ExecutionEventType.CAPABILITY_REJECTED,
+                ExecutionEventStatus.REJECTED,
                 "Terminal tasks cannot receive approval decisions.",
             )
         if self.state.current_step != "finish" or self.state.verification_status != VerificationStatus.PASSED:
             return self._emit(
-                ExecutionEventKind.ACTION_REJECTED,
+                ExecutionEventType.CAPABILITY_REJECTED,
+                ExecutionEventStatus.REJECTED,
                 "Approval is allowed only after verification passes.",
             )
 
         if approved:
             self.state.approval_status = ApprovalStatus.APPROVED
             return self._emit(
-                ExecutionEventKind.APPROVAL_RECORDED,
+                ExecutionEventType.APPROVAL_RECORDED,
+                ExecutionEventStatus.COMPLETED,
                 "Human approval recorded; workflow may finish.",
             )
 
@@ -208,7 +248,8 @@ class ExecutionController:
             "approval_rejected", "Human approval was rejected; task cancelled.", None
         )
         return self._emit(
-            ExecutionEventKind.APPROVAL_RECORDED,
+            ExecutionEventType.APPROVAL_RECORDED,
+            ExecutionEventStatus.COMPLETED,
             "Human rejection recorded; task cancelled.",
         )
 
@@ -249,19 +290,46 @@ class ExecutionController:
 
         previous_state = self.state.current_step
         self.state.current_step = self.workflow.next_state_on_success(previous_state, action)
-        self._emit(
-            ExecutionEventKind.ACTION_COMPLETED,
+        if action == "run_code":
+            self._emit(
+                ExecutionEventType.SANDBOX_COMPLETED,
+                ExecutionEventStatus.COMPLETED,
+                "Sandbox execution completed.",
+                capability_id=action,
+                request_id=result.request_id,
+                metadata=self._sandbox_metadata(result),
+            )
+        elif action == "verify_result":
+            self._emit(
+                ExecutionEventType.VERIFICATION_COMPLETED,
+                ExecutionEventStatus.COMPLETED,
+                "Verification completed successfully.",
+                capability_id=action,
+                request_id=result.request_id,
+            )
+        completion_event = self._emit(
+            ExecutionEventType.CAPABILITY_COMPLETED,
+            ExecutionEventStatus.COMPLETED,
             f"Capability {action} completed.",
-            action,
+            capability_id=action,
+            request_id=result.request_id,
         )
+        if action == "verify_result" and self.workflow.requires_approval:
+            self._emit(
+                ExecutionEventType.HITL_REQUIRED,
+                ExecutionEventStatus.REQUIRES_ACTION,
+                "Human approval is required before this workflow can finish.",
+            )
         if action == "finish":
             self.state.final_status = FinalStatus.COMPLETED
             return self._emit(
-                ExecutionEventKind.TASK_COMPLETED,
+                ExecutionEventType.TASK_COMPLETED,
+                ExecutionEventStatus.COMPLETED,
                 "Workflow completed.",
-                action,
+                capability_id=action,
+                request_id=result.request_id,
             )
-        return self._events[-1]
+        return completion_event
 
     def _handle_failure(self, action: str, result: CapabilityResult) -> ExecutionEvent:
         self._record_controller_observation(
@@ -281,25 +349,27 @@ class ExecutionController:
 
         if self.state.retry_count >= self.state.max_retries:
             self.state.final_status = FinalStatus.FAILED
+            self._emit_capability_completion(action, result, ExecutionEventStatus.FAILED)
             self._emit(
-                ExecutionEventKind.ACTION_FAILED,
+                ExecutionEventType.CAPABILITY_COMPLETED,
+                ExecutionEventStatus.FAILED,
                 f"Capability {action} failed and retry limit is exhausted.",
-                action,
+                capability_id=action,
+                request_id=result.request_id,
             )
-            return self._emit(
-                ExecutionEventKind.TASK_FAILED,
-                "Task failed after exhausting retries.",
-                action,
-            )
+            return self._emit_task_failed("Task failed after exhausting retries.", action, result.request_id)
 
         self.state.retry_count += 1
         self.state.current_step = self.workflow.next_state_on_failure(
             self.state.current_step, action
         )
+        self._emit_capability_completion(action, result, ExecutionEventStatus.FAILED)
         return self._emit(
-            ExecutionEventKind.ACTION_FAILED,
+            ExecutionEventType.CAPABILITY_COMPLETED,
+            ExecutionEventStatus.FAILED,
             f"Capability {action} failed; corrective action is required.",
-            action,
+            capability_id=action,
+            request_id=result.request_id,
         )
 
     def _record_controller_observation(
@@ -319,15 +389,74 @@ class ExecutionController:
             )
         )
 
-    def _emit(
-        self, kind: ExecutionEventKind, summary: str, action: str | None = None
+    def _emit_capability_completion(
+        self,
+        action: str,
+        result: CapabilityResult,
+        status: ExecutionEventStatus,
+    ) -> None:
+        if action == "run_code":
+            self._emit(
+                ExecutionEventType.SANDBOX_COMPLETED,
+                status,
+                "Sandbox execution failed." if status == ExecutionEventStatus.FAILED else "Sandbox execution completed.",
+                capability_id=action,
+                request_id=result.request_id,
+                metadata=self._sandbox_metadata(result),
+            )
+        elif action == "verify_result":
+            self._emit(
+                ExecutionEventType.VERIFICATION_COMPLETED,
+                status,
+                "Verification failed." if status == ExecutionEventStatus.FAILED else "Verification completed successfully.",
+                capability_id=action,
+                request_id=result.request_id,
+            )
+
+    @staticmethod
+    def _sandbox_metadata(result: CapabilityResult) -> dict[str, object]:
+        return {
+            key: result.output[key]
+            for key in ("exit_code", "timed_out", "error_type")
+            if key in result.output
+        }
+
+    def _emit_task_failed(
+        self,
+        summary: str,
+        action: str | None = None,
+        request_id=None,
     ) -> ExecutionEvent:
-        event = ExecutionEvent(
-            sequence=len(self._events) + 1,
-            kind=kind,
-            summary=summary,
-            action=action,
-            occurred_at=datetime.now(timezone.utc),
+        return self._emit(
+            ExecutionEventType.TASK_FAILED,
+            ExecutionEventStatus.FAILED,
+            summary,
+            capability_id=action,
+            request_id=request_id,
         )
-        self._events.append(event)
-        return event
+
+    def _emit(
+        self,
+        event_type: ExecutionEventType,
+        status: ExecutionEventStatus,
+        summary: str,
+        *,
+        capability_id: str | None = None,
+        request_id=None,
+        metadata: dict[str, object] | None = None,
+    ) -> ExecutionEvent:
+        return self._event_publisher.publish(
+            ExecutionEvent(
+                session_id=self.state.session_id,
+                task_id=self.state.task_id,
+                user_id=self.state.user_id,
+                event_type=event_type,
+                component="execution_controller",
+                status=status,
+                summary=summary,
+                workflow_id=self.workflow.name.value,
+                capability_id=capability_id,
+                request_id=request_id,
+                metadata=metadata or {},
+            )
+        )

@@ -18,6 +18,103 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Execution Event Contract
+
+## Objective
+
+Implement a provider/model-independent structured execution-event system for later UI streaming and audit consumers, without adding UI, network monitoring, or changing `ModelProvider`.
+
+## What changed
+
+- Added `aegis/events.py`:
+  - Immutable, strict, JSON-serializable `ExecutionEvent` records with event/session/task/user IDs, timezone-aware timestamp, type, component, status, human-readable summary, capability/model/provider IDs, safe operational metadata, and monotonic stream sequence.
+  - Required high-level event types: task, intent, workflow, capability, model, sandbox, verification, HITL, completion, and failure events. It explicitly excludes prompts, model output, and chain-of-thought.
+  - `ExecutionEventPublisher`, an in-memory ordered publisher with subscription hooks. UI streaming and audit adapters can consume the same immutable events; audit persistence can use `model_dump(mode="json")`.
+- Updated `TaskState` with independent `task_id` and optional `user_id`, enabling every event to carry both session and task identity.
+- Updated `ExecutionController` to emit task/workflow lifecycle events plus capability, sandbox, verification, HITL, completion, failure, and governed rejection/limit events. Existing `ExecutionEventKind` names remain compatibility aliases.
+- Updated `RouterAgentRuntime` to optionally publish deterministic model-selection/model-invocation and intent-identification events when an `ExecutionEventContext` is supplied. `ModelProvider` was not modified.
+- Added `tests/test_execution_events.py`, including controller-stream/audit serialization coverage, strict contract validation, and `MockModelProvider` coverage of the Agent Runtime model and intent events.
+- Updated the provider-substitution assertions for the new Controller initialization events.
+
+## Files changed
+
+- `aegis/events.py` (new)
+- `aegis/schemas.py`
+- `aegis/orchestration/controller.py`
+- `aegis/orchestration/__init__.py`
+- `aegis/agent/schemas.py`
+- `aegis/agent/runtime.py`
+- `tests/test_execution_events.py` (new)
+- `tests/test_provider_substitution.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_execution_events.py tests/test_controller.py tests/test_agent_runtime.py tests/test_schemas.py -v -p no:cacheprovider --basetemp .pytest-tmp` → 21 passed.
+- `python -m pytest tests/test_execution_events.py tests/test_controller.py tests/test_agent_runtime.py tests/test_schemas.py tests/test_provider_substitution.py -q -p no:cacheprovider --basetemp .pytest-e2e-tmp` → 31 passed.
+- `python -m compileall aegis` → passed.
+- Full regression command `python -m pytest -v -p no:cacheprovider --basetemp .pytest-tmp` collected 330 tests; 295 passed before 16 failures and 19 errors. Nineteen errors and the spreadsheet/deliverable/Docker-sandbox failures were caused by the host denying filesystem access to pytest/Python temporary directories. The three provider-substitution compatibility failures were corrected afterward and pass in the 31-test focused regression run above.
+- `git diff --check` → passed (only pre-existing warnings for inaccessible temporary directories).
+
+## Current status
+
+Complete. The event contract is provider/model-independent, has no chain-of-thought fields, and is ready for future UI and audit adapters. No UI, network monitoring, or `ModelProvider` change was introduced.
+
+## Blockers
+
+The desktop sandbox denies access to Python's default temporary directory, preventing a clean full-suite run of tests that need temporary workspaces. Focused event and adjacent regression tests pass.
+
+## Next concrete task
+
+Implement a concrete audit persistence adapter or UI streaming consumer only when explicitly scoped.
+
+---
+# 2026-09-03 — Phase 6.7 Deterministic Computation Workflow Fixture
+
+## Objective
+
+Create one deterministic synthetic fixture that demonstrates Workflow B end to end:
+user request → Agent intent and plan → spreadsheet inspection → computation formulation → Coding Model → sandbox observation and correction → deterministic verification → Excel deliverable.
+
+## What changed
+
+- Added `tests/test_computation_workflow_fixture.py`:
+  - Builds one temporary, deterministic `synthetic_equipment_readings.xlsx` workbook with two equipment items and known expected averages/compliance outcomes.
+  - Exercises the real `inspect_spreadsheet`, `generate_code`, `run_code`, `verify_result`, and `generate_excel` capabilities through `RegistryCapabilityBroker` and `ExecutionController`.
+  - Uses deterministic `MockModelProvider` responses to demonstrate Agent intent, bounded plan, observation-based correction, verification, deliverable generation, and finish decisions.
+  - Uses `MockSandboxRunner` through the production sandbox interface to keep the fixture local and repeatable; its first run reports a `KeyError`, while the corrected Coding Model output returns the known structured result.
+  - Asserts the governed action sequence, one bounded retry, coding-model routing, corrected prompt context, verified output, final Controller status, and actual generated `.xlsx` contents.
+- Updated `aegis/capabilities/verify_result.py`:
+  - Prevents a minimum-thickness field such as `min_acceptable_thickness` from overwriting the measured/average value during threshold-consistency verification. This was required for the fixture's standard result schema to pass deterministic verification.
+
+## Files changed
+
+- `tests/test_computation_workflow_fixture.py` (new)
+- `aegis/capabilities/verify_result.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_computation_workflow_fixture.py -v -p no:cacheprovider` → blocked before fixture setup because this host denies access to pytest's default user temporary directory.
+- Elevated reruns with workspace-local pytest temporary directories exercised the new fixture and exposed two implementation issues: the fixture's correction-prompt matcher (fixed) and the minimum-thickness verifier classification (fixed).
+- Final elevated rerun of the workbook fixture was not authorized by the user on this host, so a complete post-fix fixture pass is not recorded here.
+- `python -m pytest tests/test_verify_result.py tests/test_sandbox_feedback.py -v -p no:cacheprovider` → 32 passed.
+- `python -m compileall aegis tests/test_computation_workflow_fixture.py` → passed.
+- `git diff --check` → passed (with only warnings for inaccessible pytest temporary directories created by the restricted test host).
+
+## Current status
+
+Implementation complete. The new fixture provides the required deterministic, local end-to-end Workflow B evidence, including one bounded correction cycle. Component and recovery coverage pass; the final full-fixture rerun remains pending only because this host denied its temporary-directory elevation.
+
+## Blockers
+
+Current desktop sandbox permissions prevent pytest from accessing its own temporary directory. The user declined the elevated final rerun. No architectural blocker exists.
+
+## Next concrete task
+
+Rerun `python -m pytest tests/test_computation_workflow_fixture.py -v -p no:cacheprovider --basetemp .pytest-e2e-tmp` in an environment that permits the workspace-local pytest temporary directory, then proceed to the next explicitly scoped Phase 6 task.
+
+---
 # 2026-09-03 — Phase 6.6 Computation Deliverable Generation
 
 ## Objective
