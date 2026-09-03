@@ -18,6 +18,80 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 6.2 Computation Workflow Skill
+
+## Objective
+
+Implement the computation workflow skill that orchestrates the path from user goal + inspected spreadsheet structure through code generation and sandbox execution to Agent-observable outcomes. The skill accepts user goal and inspected data schema, prepares structured prompts for the coding model, requests `generate_code` and `run_code` through the normal capability path, and exposes execution observations (stdout/stderr/exit status) to the Agent. It does not directly execute generated code.
+
+## What changed
+
+- Added `aegis/skills/computation.py` implementing:
+  - `ComputationContext`: Pydantic model capturing user goal, file path, workbook schema (sheets, columns, numeric fields, row counts, representative values), and optional error context for retry/correction.
+  - `CodeGenerationPrompt`: Structured prompt payload with computation description, data schema summary, file path, safety constraints, and optional correction context.
+  - `ExecutionOutcome`: Structured execution result (succeeded, stdout, stderr, exit_code, error_summary) for Agent reasoning.
+  - `build_code_generation_prompt(context) -> CodeGenerationPrompt`: Deterministic prompt construction grounding the coding model in actual data schema, column names, types, sample values, and safety constraints.
+  - `prepare_generate_code_inputs(prompt) -> dict`: Packages prompt into capability request inputs.
+  - `prepare_run_code_inputs(code, file_path) -> dict`: Packages code + data path for `run_code` capability.
+  - `parse_execution_observation(result) -> ExecutionOutcome`: Extracts structured execution outcome from `CapabilityResult`.
+  - `build_retry_context(context, outcome, code) -> ComputationContext`: Returns a new context with error details appended for corrective code generation, preserving original data schema.
+
+- Added `aegis/capabilities/generate_code.py` implementing:
+  - `GenerateCodeCapability`: `Capability` implementation (`kind=MODEL`) that routes code generation through `ModelRouter → ModelProvider` for the coding model role. Accepts structured inputs (computation_description, data_schema, file_path, constraints), builds model prompts, extracts code from model output (including markdown fence removal), and returns generated code as `output["code"]` with an `Observation` recording the generation event. Constructor-injected `ModelRouter` + provider map keeps the `Capability.execute()` interface unchanged.
+
+- Added `aegis/capabilities/run_code.py` implementing:
+  - `SandboxRunner` (ABC): Abstract sandbox execution interface with `run(code, data_file_path) -> SandboxResult`.
+  - `SandboxResult`: Structured sandbox output (stdout, stderr, exit_code, timed_out).
+  - `MockSandboxRunner`: Test-only implementation with configurable default results and a `result_factory` for scenario-specific responses. Records invocation history for test assertions.
+  - `RunCodeCapability`: `Capability` implementation (`kind=TOOL`) that delegates to a `SandboxRunner`. Returns structured `output["stdout"]`, `output["stderr"]`, `output["exit_code"]`. Failed executions (non-zero exit code or timeout) return `CapabilityResultStatus.FAILED` with error details. Each execution produces an `Observation` recording the outcome.
+
+- Updated `aegis/skills/__init__.py` to export all computation skill types and functions.
+- Updated `aegis/capabilities/__init__.py` to export `GenerateCodeCapability`, `RunCodeCapability`, `SandboxRunner`, `MockSandboxRunner`, and `SandboxResult`.
+
+- Added comprehensive test suite in `tests/test_computation_skill.py` (50 tests) organized into 10 categories:
+  - **Prompt construction** (10 tests): Verifies prompt includes user goal, file path, columns, numeric fields, row count, sample values, sheet names, safety constraints, and correction context on retry.
+  - **Input preparation** (3 tests): Verifies `prepare_generate_code_inputs` and `prepare_run_code_inputs` produce correct dict structures.
+  - **Execution observation parsing** (4 tests): Verifies `parse_execution_observation` correctly extracts success/failure, stdout, stderr, exit code from `CapabilityResult`.
+  - **Retry context** (3 tests): Verifies `build_retry_context` preserves original data, appends error info, and increments attempt counter.
+  - **GenerateCodeCapability** (6 tests): Verifies code generation via `MockModelProvider`, markdown fence extraction, missing input handling, missing provider handling, wrong capability name rejection, and observation model_id recording.
+  - **RunCodeCapability** (9 tests): Verifies successful/failed/timeout execution, missing code input, sandbox exception handling, observation production, call counting, and wrong capability name rejection.
+  - **Capability registration** (4 tests): Verifies both capabilities register in `CapabilityRegistry` and resolve through `RegistryCapabilityBroker`.
+  - **Controller integration** (3 tests): Verifies full computation workflow step sequence (`inspect_spreadsheet → generate_code → run_code → verify → generate_excel → finish`) through `ExecutionController`, state transitions, and observation recording.
+  - **Error recovery** (3 tests): Verifies sandbox failure triggers retry-to-generate state transition, skill retry context produces correction prompt, and full failure→correction→success flow (ACT → OBSERVE ERROR → REASON → CORRECT → ACT → SUCCESS).
+  - **Model validation** (5 tests): Verifies Pydantic constraints on `ComputationContext`, `ExecutionOutcome`, and `CodeGenerationPrompt`.
+
+- Updated `tests/test_imports.py` with import verification for all new skill and capability types.
+
+## Files changed
+
+- `aegis/skills/computation.py` (new)
+- `aegis/skills/__init__.py`
+- `aegis/capabilities/generate_code.py` (new)
+- `aegis/capabilities/run_code.py` (new)
+- `aegis/capabilities/__init__.py`
+- `tests/test_computation_skill.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_computation_skill.py -v -p no:cacheprovider` → 50 passed
+- `python -m pytest tests -q -p no:cacheprovider` → 244 passed
+- `python -m compileall aegis tests` → passed
+
+## Current status
+
+Complete. The computation workflow skill provides structured prompt construction, input preparation, execution observation parsing, and retry context building. `GenerateCodeCapability` routes code generation through `ModelRouter → ModelProvider`. `RunCodeCapability` delegates to an abstract `SandboxRunner` (mock for testing, Docker in Phase 6.4). All capabilities integrate cleanly with `CapabilityRegistry`, `RegistryCapabilityBroker`, and `ExecutionController`.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 6.3 — Implement the coding model through `ModelRouter`/`ModelProvider` for real code generation (Colab/local model serving), or Phase 6.4 — Implement the Docker sandbox (`SandboxRunner` implementation with `--network none`) for real code execution.
+
+---
 # 2026-09-03 — Phase 6.1 Deterministic Spreadsheet Inspection (inspect_spreadsheet)
 
 

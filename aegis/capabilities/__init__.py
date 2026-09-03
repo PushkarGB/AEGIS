@@ -1,6 +1,7 @@
 """Registered, bounded capabilities invoked only through the Capability Broker."""
 
 from .base import Capability, CapabilityContract, CapabilityKind, CapabilityMetadata
+from .generate_code import GenerateCodeCapability
 from .inspect_spreadsheet import (
     ColumnInfo,
     InspectSpreadsheetCapability,
@@ -15,6 +16,12 @@ from .registry import (
     DuplicateCapabilityError,
     UnknownCapabilityError,
 )
+from .run_code import (
+    MockSandboxRunner,
+    RunCodeCapability,
+    SandboxResult,
+    SandboxRunner,
+)
 
 __all__ = [
     "Capability",
@@ -25,7 +32,12 @@ __all__ = [
     "ColumnInfo",
     "DisabledCapabilityError",
     "DuplicateCapabilityError",
+    "GenerateCodeCapability",
     "InspectSpreadsheetCapability",
+    "MockSandboxRunner",
+    "RunCodeCapability",
+    "SandboxResult",
+    "SandboxRunner",
     "SheetInfo",
     "UnknownCapabilityError",
     "WorkbookInspection",

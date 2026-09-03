@@ -44,11 +44,26 @@ from aegis.broker import CapabilityBroker, RegistryCapabilityBroker
 from aegis.capabilities import (
     Capability,
     CapabilityRegistry,
+    GenerateCodeCapability,
     InspectSpreadsheetCapability,
+    MockSandboxRunner,
+    RunCodeCapability,
+    SandboxResult,
+    SandboxRunner,
     WorkbookInspection,
     inspect_spreadsheet,
 )
 from aegis.orchestration import ExecutionController, WorkflowName
+from aegis.skills import (
+    CodeGenerationPrompt,
+    ComputationContext,
+    ExecutionOutcome,
+    build_code_generation_prompt,
+    build_retry_context,
+    parse_execution_observation,
+    prepare_generate_code_inputs,
+    prepare_run_code_inputs,
+)
 
 
 def test_package_version():
@@ -114,3 +129,22 @@ def test_model_registry_and_router_are_importable():
     assert RoutingDecision.__name__ == "RoutingDecision"
     assert FallbackInfo.__name__ == "FallbackInfo"
     assert issubclass(RoutingError, ValueError)
+
+
+def test_computation_skill_is_importable():
+    assert ComputationContext.__name__ == "ComputationContext"
+    assert CodeGenerationPrompt.__name__ == "CodeGenerationPrompt"
+    assert ExecutionOutcome.__name__ == "ExecutionOutcome"
+    assert callable(build_code_generation_prompt)
+    assert callable(prepare_generate_code_inputs)
+    assert callable(prepare_run_code_inputs)
+    assert callable(parse_execution_observation)
+    assert callable(build_retry_context)
+
+
+def test_generate_and_run_code_capabilities_are_importable():
+    assert GenerateCodeCapability.__name__ == "GenerateCodeCapability"
+    assert RunCodeCapability.__name__ == "RunCodeCapability"
+    assert issubclass(SandboxRunner, object)
+    assert MockSandboxRunner.__name__ == "MockSandboxRunner"
+    assert SandboxResult.__name__ == "SandboxResult"
