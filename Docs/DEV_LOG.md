@@ -18,6 +18,196 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 6.6 Computation Deliverable Generation
+
+## Objective
+
+Implement deliverable generation for Workflow B (`generate_excel` capability and standalone `generate_excel_deliverable` function) producing a professional, verified industrial Excel workbook (`.xlsx`) containing:
+1. requested calculation;
+2. source data reference;
+3. result (executive KPI summary and itemized tabular findings);
+4. relevant methodology;
+5. verification status.
+
+Enforce sovereign on-premise execution, local spreadsheet formatting via `openpyxl`, and zero exposure of model chain-of-thought.
+
+## What changed
+
+- Added `aegis/capabilities/generate_excel.py`:
+  - `generate_excel_deliverable(...)`: Standalone deterministic engine creating multi-sheet `.xlsx` workbooks with:
+    - Sheet 1 ("Calculation Summary"): Formatted metadata blocks containing requested calculation, source data reference, methodology, verification status, and aggregate KPIs (total evaluated, compliant count, below minimum count).
+    - Sheet 2 ("Detailed Results"): Itemized tabular data with auto-width columns, formatted floats/integers, and styled compliance indicators ("COMPLIANT" in soft green, "BELOW MINIMUM" in soft red).
+    - Returns `(target_file, metadata)`.
+  - `GenerateExcelCapability(Capability)`: Concrete tool capability (`name="generate_excel"`, `kind=CapabilityKind.TOOL`, `input_modalities=("spreadsheet",)`).
+    - Resolves flexible alias inputs (`requested_calculation`, `computation_objective`, `user_goal`, `source_data_reference`, `file_path`, `result`, `results`, `data`, `stdout`, `methodology`, `verification_status`).
+    - Produces `Artifact` schema object pointing to the local `.xlsx` deliverable file.
+    - Emits `Observation(source="generate_excel", kind="artifact_generated")`.
+    - Returns `CapabilityResult(status=SUCCEEDED, artifacts=[artifact], output=...)`.
+- Updated `aegis/capabilities/__init__.py`:
+  - Exported `GenerateExcelCapability` and `generate_excel_deliverable`.
+- Updated `tests/test_imports.py`:
+  - Added import verification and assertions for `GenerateExcelCapability` and `generate_excel_deliverable`.
+- Added comprehensive test suite `tests/test_generate_excel.py` (8 tests):
+  - `TestGenerateExcelDeliverableFunction`: tests deliverable contains all 5 required elements, delivers from raw JSON stdout, and applies number formatting and compliance indicators.
+  - `TestGenerateExcelCapability`: tests capability metadata, execution producing artifact and observation, and flexible alias key resolution.
+  - `TestControllerComputationWorkflowIntegration`: tests `ExecutionController` moves through `deliver` to `finish` and registers produced artifact in `state.generated_artifacts`.
+  - `TestChainOfThoughtNonExposureInvariant`: confirms no chain-of-thought is present in outputs, observations, or workbook text.
+
+## Files changed
+
+- `aegis/capabilities/generate_excel.py` (new)
+- `aegis/capabilities/__init__.py`
+- `tests/test_generate_excel.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_generate_excel.py -v -p no:cacheprovider` → 8 passed
+- `python -m pytest tests/test_imports.py -v -p no:cacheprovider` → 10 passed
+- `python -m pytest tests -v -p no:cacheprovider` → 326 passed
+- `python -m compileall aegis tests` → passed
+
+## Current status
+
+Complete. Computation deliverable generation for Workflow B is fully implemented and tested without exposing model chain-of-thought.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 6.7 — End-to-end integration of Workflow B (Industrial Data → Inspection → Generation → Sandbox Execution → Observation Recovery → Deterministic Verification → Deliverable Generation).
+
+---
+# 2026-09-03 — Phase 6.5 Deterministic Verification for Computation Results
+
+## Objective
+
+Implement deterministic verification for computation outcomes (`verify_result` capability and standalone `verify_computation_result` engine) in Workflow B. Verify key properties deterministically without relying on LLMs:
+- execution succeeded (exit code 0, no timeout, no fatal stderr tracebacks, non-empty output);
+- expected result fields exist (required columns/identifiers/metrics present);
+- result is structurally valid (parseable data/JSON, finite non-NaN numbers);
+- generated output is consistent with the requested computation (positive physical measurements, bounds compliance, logical threshold consistency: average < min_acceptable when flagged).
+
+## What changed
+
+- Added `aegis/capabilities/verify_result.py`:
+  - `VerificationCheck`: Pydantic model for individual check outcomes (`name`, `passed`, `message`, `details`).
+  - `VerificationOutcome`: Pydantic model for overall verification result (`verified`, `checks`, `passed_count`, `failed_count`, `summary`, `data`).
+  - `verify_computation_result()`: Standalone pure deterministic verification engine implementing:
+    - `execution_succeeded`: checks exit_code == 0, not timed_out, no fatal Python tracebacks in stderr, and presence of output.
+    - `structural_validity`: parses JSON objects, JSON arrays, markdown-fenced blocks, key-value records, and validates finite numbers (`not math.isnan(val) and not math.isinf(val)`).
+    - `expected_fields_exist`: verifies presence of required fields (explicit or inferred from computation objective like `equipment_id`, `average_measured_thickness`, `below_min_acceptable_thickness`) using normalized matching.
+    - `computation_consistency`: verifies physical dimension positivity (thickness > 0), numeric bounds compliance, row count thresholds, and logical consistency between measured values, threshold minimums, and below-minimum flags ($average < min\_acceptable$ when flagged).
+  - `VerifyResultCapability`: Concrete `Capability` (`kind=CapabilityKind.TOOL`, `name="verify_result"`) accepting flexible input keys (`stdout`, `stderr`, `exit_code`, `data`, `expected_fields`, `computation_objective`, `min_row_count`, `numeric_bounds`, `context`, or nested `sandbox_result`), returning `CapabilityResult` with structured output and `Observation(source="verify_result", kind="verification")`.
+- Updated `aegis/capabilities/__init__.py`:
+  - Exported `VerifyResultCapability`, `verify_computation_result`, `VerificationOutcome`, and `VerificationCheck`.
+- Updated `tests/test_imports.py`:
+  - Added import verification and assertions for `VerifyResultCapability`, `verify_computation_result`, `VerificationOutcome`, and `VerificationCheck`.
+- Added comprehensive test suite `tests/test_verify_result.py` (27 tests):
+  - `TestExecutionSuccessCheck`: tests successful execution pass, non-zero exit code failure, timeout failure, fatal stderr traceback failure, empty output failure.
+  - `TestStructuralValidityCheck`: tests JSON array parsing, markdown fence parsing, nested results dict parsing, key-value line parsing, rejection of NaN/inf, unparseable output failure.
+  - `TestExpectedFieldsCheck`: tests explicit expected fields pass, missing explicit field failure, objective-inferred fields pass, missing inferred field failure.
+  - `TestComputationConsistencyCheck`: tests valid consistency pass, non-positive physical measurement failure, inconsistent threshold logic failure, out-of-bounds measurement failure, below min row count failure.
+  - `TestVerifyResultCapabilityIntegration`: tests capability metadata, successful invocation, failed execution invocation, nested sandbox_result acceptance, Controller computation workflow state transitions (`verify` -> `deliver`, `verification_status=PASSED`), and Controller recording of failed verification.
+
+## Files changed
+
+- `aegis/capabilities/verify_result.py` (new)
+- `aegis/capabilities/__init__.py`
+- `tests/test_verify_result.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_verify_result.py -v -p no:cacheprovider` → 27 passed
+- `python -m pytest tests/test_imports.py -v -p no:cacheprovider` → 9 passed
+- `python -m pytest tests -v -p no:cacheprovider` → 317 passed
+- `python -m compileall aegis tests` → passed
+
+## Current status
+
+Complete. Deterministic verification for computation results is fully implemented and tested without LLM reasoning, validating execution success, structural validity, expected field existence, and computation consistency.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 6.6 — Implement deliverable generation for computation workflow (`generate_excel` producing Excel deliverable from verified calculation results).
+
+---
+# 2026-09-03 — Phase 6.4b Connect Sandbox Observations Back to Agent
+
+## Objective
+
+Connect sandbox execution observations back to the Agent. When code execution fails:
+- Controller records the failure and governs the task state;
+- Agent receives the structured observation (stderr, exit_code, status, allowed next actions) rather than an opaque controller wrapper;
+- Agent may request a bounded correction (`RETRY_CORRECT` proposing `generate_code`);
+- Corrected code is executed again in the sandbox via `run_code`;
+- Controller retry limits are strictly enforced, transitioning to `TASK_FAILED` upon exhaustion and rejecting subsequent actions;
+- Demonstrate the complete agentic loop: `ACT → OBSERVE ERROR → REASON → CORRECT → ACT`.
+
+## What changed
+
+- Enhanced `aegis/orchestration/controller.py`:
+  - Added `last_action: str | None = None` to `ExecutionController` tracking the most recently executed action.
+  - Added `last_capability_result: CapabilityResult | None = None` capturing the result of the most recent capability invocation.
+  - Implemented `observation_for_agent() -> Observation`: extracts the underlying domain/capability observation (e.g. `run_code` execution output with stdout, stderr, and exit_code) rather than the internal `execution_controller` wrapper (`capability_failed`), allowing the Agent to reason about concrete execution outputs.
+  - Implemented `allowed_next_actions() -> tuple[str, ...]`: returns legal actions for the current workflow state, returning `()` when the task is terminal.
+- Added `aegis/agent/sandbox_feedback.py`:
+  - Implemented `SandboxObservationLoop(agent, controller)`: connects Controller observations to Agent reasoning without violating governance invariants (Agent proposes, Controller executes).
+  - Implemented `build_reasoning_request()`: packages Controller state, latest observation, and previous execution context into `ObservationReasoningRequest`.
+  - Implemented `reason()`: queries Agent runtime for `ObservationDecision`.
+  - Implemented `apply()`: executes proposed action through `controller.execute()`.
+  - Implemented `recover_from_run_code_failure(context, previous_code)`: implements the bounded `ACT → OBSERVE ERROR → REASON → CORRECT → ACT` cycle.
+  - Implemented `_overlay_inputs()`: overlays authoritative generated code from `generate_code` to prevent agent-invented code injection into `run_code`.
+- Updated `aegis/agent/__init__.py`:
+  - Exported `SandboxObservationLoop` and `SandboxRecoveryResult`.
+- Updated `tests/test_imports.py`:
+  - Added import verification and assertions for `SandboxObservationLoop` and `SandboxRecoveryResult`.
+- Added `tests/test_sandbox_feedback.py` (6 tests):
+  - `test_controller_exposes_sandbox_observation_not_governance_wrapper`: proves controller exposes capability output over governance wrapper.
+  - `test_agent_receives_structured_sandbox_error_in_reasoning_payload`: verifies Agent prompt receives stderr and error details.
+  - `test_act_observe_error_reason_correct_act_success`: demonstrates end-to-end `ACT → OBSERVE ERROR → REASON → CORRECT → ACT` with correction prompt and re-execution in sandbox.
+  - `test_controller_retry_limit_blocks_further_correction`: proves Controller retry limit exhaustion sets `final_status=FAILED` and rejects subsequent actions.
+  - `test_agent_may_decline_automatic_correction`: proves Agent can decline automatic correction (`CONTINUE` without `generate_code`).
+  - `test_correction_uses_generated_code_not_agent_invented_payload`: verifies authoritative generated code is executed rather than agent-invented payloads.
+
+## Files changed
+
+- `aegis/orchestration/controller.py`
+- `aegis/agent/sandbox_feedback.py` (new)
+- `aegis/agent/__init__.py`
+- `tests/test_sandbox_feedback.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_sandbox_feedback.py -v -p no:cacheprovider` → 6 passed
+- `python -m pytest tests/test_imports.py -v -p no:cacheprovider` → 8 passed
+- `python -m pytest tests -v -p no:cacheprovider` → 290 passed
+- `python -m compileall aegis tests` → passed
+
+## Current status
+
+Complete. Sandbox observations connect back to the Agent through the Controller, and the bounded `ACT → OBSERVE ERROR → REASON → CORRECT → ACT` recovery loop functions with strict Controller retry limits.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 6.5 — Implement verification logic for computation outcomes (`verify_result` capability applying deterministic verification rules to computation results before deliverable generation).
+
+---
 # 2026-09-03 — Phase 6.4 Implement run_code with Isolated Docker Execution Environment
 
 ## Objective

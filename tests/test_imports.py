@@ -25,6 +25,8 @@ from aegis.agent import (
     PlanGenerationRequest,
     PlanProposal,
     RouterAgentRuntime,
+    SandboxObservationLoop,
+    SandboxRecoveryResult,
 )
 from aegis.router.provider import ModelGenerationRequest, ModelGenerationResult, ModelProvider
 from aegis.router import (
@@ -46,15 +48,21 @@ from aegis.capabilities import (
     CapabilityRegistry,
     DockerSandboxRunner,
     GenerateCodeCapability,
+    GenerateExcelCapability,
     generate_code,
+    generate_excel_deliverable,
     InspectSpreadsheetCapability,
     MockSandboxRunner,
     RunCodeCapability,
     SandboxResult,
     SandboxRunner,
+    VerificationCheck,
+    VerificationOutcome,
+    VerifyResultCapability,
     WorkbookInspection,
     inspect_spreadsheet,
     run_code,
+    verify_computation_result,
 )
 from aegis.orchestration import ExecutionController, WorkflowName
 from aegis.skills import (
@@ -124,6 +132,8 @@ def test_agent_runtime_interfaces_are_importable():
     assert PlanGenerationRequest.__name__ == "PlanGenerationRequest"
     assert PlanProposal.__name__ == "PlanProposal"
     assert ObservationDecision.__name__ == "ObservationDecision"
+    assert SandboxObservationLoop.__name__ == "SandboxObservationLoop"
+    assert SandboxRecoveryResult.__name__ == "SandboxRecoveryResult"
 
 
 def test_model_registry_and_router_are_importable():
@@ -154,3 +164,15 @@ def test_generate_and_run_code_capabilities_are_importable():
     assert issubclass(DockerSandboxRunner, SandboxRunner)
     assert callable(run_code)
     assert SandboxResult.__name__ == "SandboxResult"
+
+
+def test_verify_result_capability_is_importable():
+    assert VerifyResultCapability.__name__ == "VerifyResultCapability"
+    assert callable(verify_computation_result)
+    assert VerificationOutcome.__name__ == "VerificationOutcome"
+    assert VerificationCheck.__name__ == "VerificationCheck"
+
+
+def test_generate_excel_capability_is_importable():
+    assert GenerateExcelCapability.__name__ == "GenerateExcelCapability"
+    assert callable(generate_excel_deliverable)
