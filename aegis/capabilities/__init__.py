@@ -17,10 +17,12 @@ from .registry import (
     UnknownCapabilityError,
 )
 from .run_code import (
+    DockerSandboxRunner,
     MockSandboxRunner,
     RunCodeCapability,
     SandboxResult,
     SandboxRunner,
+    run_code,
 )
 
 __all__ = [
@@ -31,6 +33,7 @@ __all__ = [
     "CapabilityRegistry",
     "ColumnInfo",
     "DisabledCapabilityError",
+    "DockerSandboxRunner",
     "DuplicateCapabilityError",
     "GenerateCodeCapability",
     "generate_code",
@@ -44,4 +47,5 @@ __all__ = [
     "WorkbookInspection",
     "WorkbookMetadata",
     "inspect_spreadsheet",
+    "run_code",
 ]

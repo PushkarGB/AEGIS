@@ -44,6 +44,7 @@ from aegis.broker import CapabilityBroker, RegistryCapabilityBroker
 from aegis.capabilities import (
     Capability,
     CapabilityRegistry,
+    DockerSandboxRunner,
     GenerateCodeCapability,
     generate_code,
     InspectSpreadsheetCapability,
@@ -53,6 +54,7 @@ from aegis.capabilities import (
     SandboxRunner,
     WorkbookInspection,
     inspect_spreadsheet,
+    run_code,
 )
 from aegis.orchestration import ExecutionController, WorkflowName
 from aegis.skills import (
@@ -149,4 +151,6 @@ def test_generate_and_run_code_capabilities_are_importable():
     assert RunCodeCapability.__name__ == "RunCodeCapability"
     assert issubclass(SandboxRunner, object)
     assert MockSandboxRunner.__name__ == "MockSandboxRunner"
+    assert issubclass(DockerSandboxRunner, SandboxRunner)
+    assert callable(run_code)
     assert SandboxResult.__name__ == "SandboxResult"

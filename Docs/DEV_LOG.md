@@ -18,6 +18,74 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 6.4 Implement run_code with Isolated Docker Execution Environment
+
+## Objective
+
+Implement `run_code` using an isolated Docker execution environment (`DockerSandboxRunner`). Ensure generated code executes inside the container with network access disabled (`--network none`), stdout/stderr/exit status captured, timeout enforced with container cleanup, host filesystem access strictly restricted to the required workspace, and generated code never executed directly on the host. Include graceful error handling with structured error typing when Docker service/daemon is unavailable or fails.
+
+## What changed
+
+- Enhanced `aegis/capabilities/run_code.py`:
+  - Added `error_type: str | None = None` to `SandboxResult` dataclass for structured infrastructure and execution failure categorization.
+  - Implemented `DockerSandboxRunner(SandboxRunner)`:
+    - Executes Python code strictly inside Docker container via `self.container_runtime` (default `docker`).
+    - Disables network access via `--network none`. Explicitly rejects any configuration with `network_enabled=True`.
+    - Enforces container resource limits (`--memory 512m`, `--cpus 1.0`, `--pids-limit 100`) and security flags (`--security-opt no-new-privileges`, `--rm`).
+    - Restricts host filesystem access strictly to the workspace directory: mounts only `-v <workspace>:/workspace:rw` (or `:ro`), executes in `--workdir /workspace`, and writes code to `_execution_script.py`. Copies input data files if provided and resolves paths within the isolated workspace.
+    - Captures stdout and stderr streams independently, and captures process exit code.
+    - Enforces timeout via `subprocess.run(timeout=...)`, catches `subprocess.TimeoutExpired`, terminates container via `_kill_container` (`docker rm -f`), and returns `timed_out=True` with `error_type="timeout"`.
+    - Added graceful Docker service error handling: detects daemon connection failures (`open //./pipe/dockerDesktopLinuxEngine`, `Cannot connect to the Docker daemon`, etc.) and categorizes with `error_type="docker_daemon_unavailable"`, missing runtime with `error_type="docker_not_found"`.
+    - Preserved host safety invariant: NEVER executes generated code directly on the host under any failure or fallback condition.
+    - Provided `is_available()` to check Docker daemon status.
+    - Added standalone `run_code(code, data_file_path, *, runner, **kwargs) -> SandboxResult`.
+  - Updated `RunCodeCapability`:
+    - Defaults `self._sandbox` to `DockerSandboxRunner` when `sandbox` is None, maintaining full backwards-compatibility with custom or mock runners.
+    - Updated metadata output contract to include `error_type`.
+    - Emits structured `Observation` with failure reasons and `error_type` in `data` for future audit logging.
+- Updated `aegis/capabilities/__init__.py`:
+  - Exported `DockerSandboxRunner` and `run_code`.
+- Updated `tests/test_imports.py`:
+  - Verified `DockerSandboxRunner` and `run_code` are importable and meet contract requirements.
+- Added comprehensive test suite `tests/test_run_code.py` (23 tests):
+  - Docker command construction & security invariants (`--network none`, `--rm`, `--security-opt no-new-privileges`, resource limits).
+  - Network isolation invariant (rejects `network_enabled=True`).
+  - Strict filesystem restriction (only workspace mounted, `--workdir /workspace`).
+  - Execution stream capture (stdout, stderr, exit code).
+  - Timeout enforcement and container termination (`docker rm -f`).
+  - Host execution prevention (host Python / environment never touched).
+  - Graceful Docker daemon and runtime error handling (`docker_daemon_unavailable`, `docker_not_found`).
+  - RunCodeCapability defaulting, custom runner acceptance, observation generation, and registry lookup.
+  - Standalone `run_code` function delegation.
+
+## Files changed
+
+- `aegis/capabilities/run_code.py`
+- `aegis/capabilities/__init__.py`
+- `tests/test_imports.py`
+- `tests/test_run_code.py` (new)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_run_code.py -v -p no:cacheprovider` → 23 passed
+- `python -m pytest tests/test_imports.py -v -p no:cacheprovider` → 8 passed
+- `python -m pytest tests -v -p no:cacheprovider` → 284 passed
+- `python -m compileall aegis tests` → passed
+
+## Current status
+
+Complete. `run_code` is implemented with an isolated Docker execution environment (`DockerSandboxRunner`) satisfying all network, timeout, filesystem restriction, and host protection requirements, including graceful error handling for daemon unavailability.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 6.5 — Implement verification logic for computation outcomes (`verify_result` capability applying deterministic verification rules to computation results before deliverable generation).
+
+---
 # 2026-09-03 — Phase 6.3 Integrate generate_code with Model Router and ModelProvider
 
 ## Objective
@@ -1092,16 +1160,10 @@ User request + file
 
 - [x] Implement provider-neutral TaskState schema (typed statuses, records, limits)
 - [x] Implement Execution Controller
-- [x] Implement registry-backed Capability Broker resolution/invocation
-- [x] Implement Model Registry/Router (beyond validated external configuration)
-- [ ] Implement Mock providers and integration tests
-
-### Not started
-
-- [ ] Local Agent integration
-- [ ] Computation workflow
-- [ ] Coding model integration
-- [ ] Sandbox integration
+- [x] Local Agent integration
+- [x] Computation workflow
+- [x] Coding model integration
+- [x] Sandbox integration
 - [ ] Tesseract workflow
 - [ ] Word generation
 - [ ] Multimodal workflow
@@ -1258,7 +1320,6 @@ When switching from Codex → Cursor → Antigravity or vice versa:
 
 ## Next Task
 
-**Phase 4.1 — Define local provider adapter shape and implement `MockModelProvider` for integration testing.**
+**Phase 6.5 — Implement verification logic for computation outcomes (`verify_result` capability applying deterministic verification rules to computation results before deliverable generation).**
 
-The next coding agent must read `ARCHITECTURE.md`, `DEV_LOG.md`, the `ModelProvider` interface, `ModelRegistry`, `ModelRouter`, and existing tests; implement a local provider adapter shape and a `MockModelProvider`; verify provider swapping leaves Controller/Broker/workflows unchanged; update this file; and stop after this task.
-
+The next coding agent must read `ARCHITECTURE.md`, `DEV_LOG.md`, inspect existing verification rules and computation workflows, implement deterministic verification rules for computation outputs, test with valid and corrupted calculation outputs, update `DEV_LOG.md`, and stop after that task.
