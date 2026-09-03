@@ -380,13 +380,30 @@ def verify_computation_result(
 
             for k, v in rec.items():
                 nk = _normalize_key(k)
-                if any(t in nk for t in ("average", "measured", "avg", "thickness")):
-                    if isinstance(v, (int, float)):
+                is_flag_field = any(t in nk for t in ("below", "is_below", "failed_min", "non_compliant"))
+                is_minimum_field = (
+                    not is_flag_field
+                    and any(
+                        t in nk
+                        for t in (
+                            "min_acceptable",
+                            "minimum_acceptable",
+                            "threshold",
+                            "min_thickness",
+                        )
+                    )
+                )
+                if (
+                    not is_minimum_field
+                    and not is_flag_field
+                    and any(t in nk for t in ("average", "measured", "avg", "thickness"))
+                ):
+                    if not isinstance(v, bool) and isinstance(v, (int, float)):
                         avg_val = float(v)
-                if any(t in nk for t in ("min_acceptable", "minimum_acceptable", "threshold", "min_thickness")):
-                    if isinstance(v, (int, float)):
+                if is_minimum_field:
+                    if not isinstance(v, bool) and isinstance(v, (int, float)):
                         min_acc_val = float(v)
-                if any(t in nk for t in ("below", "is_below", "failed_min", "non_compliant")):
+                if is_flag_field:
                     if isinstance(v, bool):
                         below_min_flag = v
 
