@@ -45,6 +45,7 @@ from aegis.capabilities import (
     Capability,
     CapabilityRegistry,
     GenerateCodeCapability,
+    generate_code,
     InspectSpreadsheetCapability,
     MockSandboxRunner,
     RunCodeCapability,
@@ -144,6 +145,7 @@ def test_computation_skill_is_importable():
 
 def test_generate_and_run_code_capabilities_are_importable():
     assert GenerateCodeCapability.__name__ == "GenerateCodeCapability"
+    assert callable(generate_code)
     assert RunCodeCapability.__name__ == "RunCodeCapability"
     assert issubclass(SandboxRunner, object)
     assert MockSandboxRunner.__name__ == "MockSandboxRunner"

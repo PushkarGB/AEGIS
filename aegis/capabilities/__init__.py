@@ -1,7 +1,7 @@
 """Registered, bounded capabilities invoked only through the Capability Broker."""
 
 from .base import Capability, CapabilityContract, CapabilityKind, CapabilityMetadata
-from .generate_code import GenerateCodeCapability
+from .generate_code import GenerateCodeCapability, generate_code
 from .inspect_spreadsheet import (
     ColumnInfo,
     InspectSpreadsheetCapability,
@@ -33,6 +33,7 @@ __all__ = [
     "DisabledCapabilityError",
     "DuplicateCapabilityError",
     "GenerateCodeCapability",
+    "generate_code",
     "InspectSpreadsheetCapability",
     "MockSandboxRunner",
     "RunCodeCapability",

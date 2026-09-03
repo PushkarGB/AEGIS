@@ -18,6 +18,62 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 6.3 Integrate generate_code with Model Router and ModelProvider
+
+## Objective
+
+Integrate `generate_code` with the `ModelRouter` and `ModelProvider`. The coding model receives the computation objective, relevant spreadsheet structure/data description, and required output constraints, and returns executable Python code without executing it.
+
+## What changed
+
+- Enhanced `aegis/capabilities/generate_code.py`:
+  - Added standalone `generate_code(router, provider, *, computation_objective, spreadsheet_structure, output_constraints, file_path, correction_context) -> str` function routing to the coding model role through `ModelRouter` and generating code via `ModelProvider`.
+  - Updated `GenerateCodeCapability`:
+    - Structured prompt generation delivering all three required components to the Coding Model: computation objective, relevant spreadsheet structure/data description, and required output constraints.
+    - Flexible input resolution for computation objective (`computation_objective`, `computation_description`, `computation`, `objective`, `user_goal`, `goal`, `task`), spreadsheet structure (`relevant_spreadsheet_structure`, `spreadsheet_structure`, `data_description`, `data_schema`, `structure`, `schema`), and output constraints (`required_output_constraints`, `output_constraints`, `constraints`).
+    - Handled structured dictionary inputs for spreadsheet structure (e.g. from `inspect_spreadsheet`).
+    - Standard default safety output constraints when none or partial constraints are provided.
+    - Robust extraction of executable Python code from raw text and markdown fences (`python` tags or untagged), removing surrounding commentary.
+    - Preserved non-execution invariant: generated code is returned as an executable string and is never executed during generation.
+    - Updated capability input contracts in metadata to reflect accepted inputs.
+- Updated `aegis/capabilities/__init__.py`:
+  - Exported `generate_code` alongside `GenerateCodeCapability`.
+- Updated `tests/test_imports.py`:
+  - Added verification for `generate_code` import and callable contract.
+- Added comprehensive test suite `tests/test_generate_code.py` (17 tests):
+  - ModelRouter & ModelProvider integration (coding role routing, request formation, single provider and dict mappings, missing provider failures, observation metadata).
+  - Coding model prompt validation (objective, spreadsheet structure/data description, required output constraints, file path, retry correction context, dictionary structure formatting, input aliases).
+  - Executable Python code extraction and syntax verification (`ast.parse`) across raw code, markdown fences, and text commentary.
+  - Non-execution invariant testing proving code with potential side-effects is never executed.
+  - Standalone `generate_code()` function testing and argument validation.
+
+## Files changed
+
+- `aegis/capabilities/generate_code.py`
+- `aegis/capabilities/__init__.py`
+- `tests/test_imports.py`
+- `tests/test_generate_code.py` (new)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_generate_code.py -v -p no:cacheprovider` → 17 passed
+- `python -m pytest tests -v -p no:cacheprovider` → 261 passed
+- `python -m compileall aegis tests` → passed
+
+## Current status
+
+Complete. `generate_code` is integrated with `ModelRouter` and `ModelProvider`. The coding model receives the computation objective, relevant spreadsheet structure/data description, and required output constraints, returning executable Python code without executing it.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 6.4 — Implement Docker sandbox execution (`SandboxRunner` implementation with `--network none` and resource limits) for safe execution of generated Python code in Workflow B.
+
+---
 # 2026-09-03 — Phase 6.2 Computation Workflow Skill
 
 ## Objective
