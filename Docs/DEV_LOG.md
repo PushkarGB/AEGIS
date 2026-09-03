@@ -18,6 +18,83 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 6.X Network Monitoring Abstraction
+
+## Objective
+
+Implement a provider-independent `NetworkMonitor` interface and replaceable collector abstraction in `aegis.security` to observe local and container network activity. Support deterministic offline classification (`INTERNAL`, `EXTERNAL`, `BLOCKED`, `UNKNOWN`), strict distinction between observed traffic, configured policy, and actually observed blocked traffic, with zero fabricated events and zero external telemetry.
+
+## What changed
+
+- Added `aegis/security/network_models.py` (new):
+  - `NetworkClassification` (StrEnum: `INTERNAL`, `EXTERNAL`, `BLOCKED`, `UNKNOWN`).
+  - `TrafficDirection` (StrEnum: `INBOUND`, `OUTBOUND`, `LOOPBACK`, `UNKNOWN`).
+  - `TrafficStatus` (StrEnum: `ALLOWED`, `BLOCKED`, `OBSERVED`, `UNKNOWN`).
+  - `NetworkObservation` (Pydantic frozen BaseModel): `observation_id`, `timestamp` (UTC-aware), `source`, `destination`, `destination_port`, `protocol`, `direction`, `classification`, `process`, `container`, `status`, `metadata`, and `process_or_container` property.
+  - `NetworkPolicy` (Pydantic frozen BaseModel): `policy_id`, `allow_external` (default False for strict sovereignty), `allowed_internal_cidrs`, `allowed_destination_ports`, `allowed_protocols`, `require_sandbox_isolation`.
+  - `PolicyViolation` (Pydantic frozen BaseModel): captures compliance discrepancies against observed traffic without mutating or fabricating events.
+  - `NetworkSummary` (Pydantic frozen BaseModel): aggregated statistics across observed traffic.
+
+- Added `aegis/security/network_classifier.py` (new):
+  - Deterministic offline classification using Python standard library `ipaddress` without external DNS or telemetry.
+  - `is_internal_ip`: detects loopback, RFC 1918 private subnets, link-local, and custom subnets.
+  - `classify_destination`: maps destination endpoints to `INTERNAL`, `EXTERNAL`, `BLOCKED`, or `UNKNOWN`.
+  - Invariant: `BLOCKED` classification is assigned only when traffic was actually observed as blocked (`TrafficStatus.BLOCKED`).
+  - `determine_traffic_direction`: infers `LOOPBACK`, `INBOUND`, `OUTBOUND`, or `UNKNOWN`.
+
+- Added `aegis/security/collector.py` (new):
+  - `NetworkCollector` (ABC): abstract collector interface ensuring collector replaceability.
+  - `InMemoryNetworkCollector`: replaceable collector for synthetic feeds, unit tests, and controlled injection.
+  - `LocalConnectionCollector`: lightweight prototype collector inspecting local host sockets via `psutil` if available, with graceful fallback to standard OS utilities (`netstat -ano` on Windows, `ss`/`netstat` on Linux). Never fabricates blocked events.
+
+- Added `aegis/security/network_monitor.py` (new):
+  - `NetworkMonitor` (ABC): provider-independent monitoring contract with methods `get_observations`, `record_observation`, `collect_now`, `get_summary`, and `verify_policy`.
+  - `StandardNetworkMonitor`: thread-safe concrete monitor with pluggable `NetworkCollector`, bounded ring-buffer history, rich filtering, metrics summary, and policy verification.
+  - `AuthorizedNetworkMonitor`: RBAC-protected facade requiring `Permission.ACCESS_NETWORK_MONITOR` (granted exclusively to `ADMIN`).
+
+- Updated `aegis/security/__init__.py`:
+  - Re-exported all network monitoring models, enums, classifier functions, collectors, and monitor classes.
+
+- Added `tests/test_network_monitor.py` (new, 61 tests across 7 test classes):
+  - `TestClassification` (39 tests): synthetic test coverage for loopback, RFC 1918, link-local, named local domains, public IPs, external hostnames, malformed/unknown targets, custom CIDRs, and actually observed blocked events.
+  - `TestTrafficDirection` (4 tests): verifies loopback, inbound, outbound, and unknown traffic directions.
+  - `TestPolicyVsObservationDistinction` (3 tests): verifies policy evaluation does not fabricate blocked network events; ensures blocked status is only recorded when actually observed; checks observation immutability.
+  - `TestCollectors` (3 tests): tests `InMemoryNetworkCollector` queueing, `LocalConnectionCollector` prototype execution without crashing, and host/port splitting.
+  - `TestNetworkMonitorInterface` (7 tests): tests filtering by classification, direction, status, limit/since, summary metrics calculation, and collector replacement.
+  - `TestPolicyVerification` (4 tests): tests detection of unpermitted egress, sandbox container egress, unauthorized ports, and zero-violation compliant traffic.
+  - `TestAuthorizedNetworkMonitor` (2 tests): verifies ADMIN caller can access network monitor, and USER caller is denied with `AuthorizationError`.
+
+- Updated `tests/test_imports.py`:
+  - Added import verification test `test_security_network_monitoring_is_importable`.
+
+## Files changed
+
+- `aegis/security/network_models.py` (new)
+- `aegis/security/network_classifier.py` (new)
+- `aegis/security/collector.py` (new)
+- `aegis/security/network_monitor.py` (new)
+- `aegis/security/__init__.py`
+- `tests/test_network_monitor.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `pytest tests/test_network_monitor.py -v` → **61 passed**.
+- `pytest` → **630 passed** (full test suite regression pass, 0 failures, 0 errors).
+
+## Current status
+
+Phase 6.X complete. Provider-independent NetworkMonitor interface and lightweight replaceable collector implemented. Deterministic offline classification and policy validation operational with zero external telemetry and zero fabricated events. Admin UI intentionally deferred as specified.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Stop after this task as explicitly requested.
+
 # 2026-09-03 — Phase 6.X Prototype RBAC
 
 ## Objective

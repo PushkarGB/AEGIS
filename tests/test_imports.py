@@ -216,3 +216,42 @@ def test_auth_config_is_importable():
     from aegis.config import AuthConfig, AegisConfig
     assert AuthConfig.__name__ == "AuthConfig"
     assert "auth" in AegisConfig.model_fields
+
+
+def test_security_network_monitoring_is_importable():
+    from aegis.security import (
+        AuthorizedNetworkMonitor,
+        InMemoryNetworkCollector,
+        LocalConnectionCollector,
+        NetworkClassification,
+        NetworkCollector,
+        NetworkMonitor,
+        NetworkObservation,
+        NetworkPolicy,
+        NetworkSummary,
+        PolicyViolation,
+        StandardNetworkMonitor,
+        TrafficDirection,
+        TrafficStatus,
+        classify_destination,
+        determine_traffic_direction,
+        is_internal_ip,
+    )
+
+    assert issubclass(NetworkMonitor, object)
+    assert StandardNetworkMonitor.__name__ == "StandardNetworkMonitor"
+    assert AuthorizedNetworkMonitor.__name__ == "AuthorizedNetworkMonitor"
+    assert issubclass(NetworkCollector, object)
+    assert InMemoryNetworkCollector.__name__ == "InMemoryNetworkCollector"
+    assert LocalConnectionCollector.__name__ == "LocalConnectionCollector"
+    assert NetworkClassification.INTERNAL == "INTERNAL"
+    assert NetworkClassification.EXTERNAL == "EXTERNAL"
+    assert NetworkClassification.BLOCKED == "BLOCKED"
+    assert NetworkClassification.UNKNOWN == "UNKNOWN"
+    assert TrafficDirection.LOOPBACK == "LOOPBACK"
+    assert TrafficStatus.OBSERVED == "OBSERVED"
+    assert NetworkObservation.__name__ == "NetworkObservation"
+    assert NetworkPolicy.__name__ == "NetworkPolicy"
+    assert callable(classify_destination)
+    assert callable(determine_traffic_direction)
+    assert callable(is_internal_ip)
