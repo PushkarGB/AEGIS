@@ -9,6 +9,10 @@ from .providers import (
     ModelProviderConnectionError,
     ModelProviderError,
     ModelProviderResponseError,
+    OllamaHealthStatus,
+    OllamaHttpRequest,
+    OllamaModelProvider,
+    OllamaTransport,
     TemporaryAPIProviderDisabledError,
 )
 from .registry import ModelRegistry
@@ -28,6 +32,10 @@ __all__ = [
     "ModelRegistry",
     "ModelRouter",
     "MockModelProvider",
+    "OllamaHealthStatus",
+    "OllamaHttpRequest",
+    "OllamaModelProvider",
+    "OllamaTransport",
     "RoutingDecision",
     "RoutingError",
     "TemporaryAPIProviderDisabledError",

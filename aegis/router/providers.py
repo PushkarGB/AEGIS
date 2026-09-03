@@ -320,3 +320,8 @@ class APIModelProvider(_OpenAICompatibleModelProvider):
                 "Temporary API providers are disabled by runtime configuration."
             )
         super().__init__(provider_config, model_configs, transport=transport)
+
+
+# Re-export Ollama adapter symbols
+from .ollama import OllamaHealthStatus, OllamaHttpRequest, OllamaModelProvider, OllamaTransport
+

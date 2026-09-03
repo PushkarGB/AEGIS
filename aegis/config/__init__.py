@@ -12,10 +12,12 @@ from .schemas import (
     ModelHealth,
     ModelProviderConfig,
     ModelRegistryConfig,
+    OllamaConfig,
     RuntimeControllerLimits,
     RuntimeSandboxSettings,
     RuntimeSettings,
     RuntimeUISettings,
+    load_ollama_config,
 )
 
 __all__ = [
@@ -31,10 +33,12 @@ __all__ = [
     "ModelHealth",
     "ModelProviderConfig",
     "ModelRegistryConfig",
+    "OllamaConfig",
     "RuntimeControllerLimits",
     "RuntimeSandboxSettings",
     "RuntimeSettings",
     "RuntimeUISettings",
     "load_config",
+    "load_ollama_config",
     "resolve_config_paths",
 ]

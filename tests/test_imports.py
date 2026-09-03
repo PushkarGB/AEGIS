@@ -38,6 +38,8 @@ from aegis.router import (
     ModelProviderConnectionError,
     ModelRegistry,
     ModelRouter,
+    OllamaHealthStatus,
+    OllamaModelProvider,
     RoutingDecision,
     RoutingError,
     TemporaryAPIProviderDisabledError,
@@ -104,6 +106,9 @@ def test_model_provider_interface_is_importable():
     assert MockModelProvider.__name__ == "MockModelProvider"
     assert LocalModelProvider.__name__ == "LocalModelProvider"
     assert APIModelProvider.__name__ == "APIModelProvider"
+    assert OllamaModelProvider.__name__ == "OllamaModelProvider"
+    assert issubclass(OllamaModelProvider, ModelProvider)
+    assert OllamaHealthStatus.__name__ == "OllamaHealthStatus"
     assert issubclass(ModelProviderConfigurationError, ValueError)
     assert issubclass(ModelProviderConnectionError, RuntimeError)
     assert issubclass(TemporaryAPIProviderDisabledError, ValueError)
@@ -267,3 +272,4 @@ def test_ui_package_is_importable():
     from aegis.ui import UIBackendService, create_app
     assert UIBackendService.__name__ == "UIBackendService"
     assert callable(create_app)
+

@@ -15,3 +15,7 @@ include = ["aegis*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "manual: manual integration checks requiring live endpoints",
+]
+

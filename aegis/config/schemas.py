@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -319,3 +320,60 @@ class AegisConfig(BaseModel):
     capabilities: CapabilityRegistryConfig
     runtime: RuntimeSettings
     auth: AuthConfig = Field(default_factory=AuthConfig)
+
+
+class OllamaConfig(BaseModel):
+    """Configuration for connecting to an Ollama HTTP endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str = Field(default="http://127.0.0.1:11434", min_length=1)
+    model: str = Field(default="qwen2.5:7b", min_length=1)
+    timeout_seconds: float = Field(default=60.0, ge=0.1, le=3600.0)
+    non_thinking: bool = True
+
+
+def load_ollama_config(
+    *,
+    base_url: str | None = None,
+    model: str | None = None,
+    timeout_seconds: int | float | None = None,
+    non_thinking: bool | None = None,
+) -> OllamaConfig:
+    """Resolve Ollama configuration from arguments and environment variables.
+
+    Supported environment variables:
+    - OLLAMA_BASE_URL (default: http://127.0.0.1:11434)
+    - OLLAMA_MODEL (default: qwen2.5:7b)
+    - OLLAMA_TIMEOUT (default: 60)
+    - OLLAMA_NON_THINKING (default: true)
+    """
+    resolved_base_url = (
+        base_url
+        or os.getenv("OLLAMA_BASE_URL")
+        or "http://127.0.0.1:11434"
+    )
+    resolved_model = (
+        model
+        or os.getenv("OLLAMA_MODEL")
+        or "qwen2.5:7b"
+    )
+    env_timeout = os.getenv("OLLAMA_TIMEOUT")
+    resolved_timeout = float(
+        timeout_seconds
+        if timeout_seconds is not None
+        else (float(env_timeout) if env_timeout else 60.0)
+    )
+    env_non_thinking = os.getenv("OLLAMA_NON_THINKING")
+    resolved_non_thinking = (
+        non_thinking
+        if non_thinking is not None
+        else (env_non_thinking.strip().lower() not in ("0", "false", "no", "off") if env_non_thinking else True)
+    )
+    return OllamaConfig(
+        base_url=resolved_base_url,
+        model=resolved_model,
+        timeout_seconds=resolved_timeout,
+        non_thinking=resolved_non_thinking,
+    )
+

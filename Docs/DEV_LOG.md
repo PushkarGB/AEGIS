@@ -18,6 +18,87 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-04 — Connect AEGIS ModelProvider Layer to Configurable Ollama HTTP Endpoint
+
+## Objective
+
+Connect the existing AEGIS `ModelProvider` layer to a configurable Ollama HTTP endpoint beneath `ModelProvider`. Preserve the existing `ModelProvider` interface (`ModelGenerationRequest -> ModelGenerationResult`) and invocation hierarchy (`Agent → ModelRouter → ModelProvider → Ollama`). Do not allow Agent, Controller, Broker, or capabilities to call Ollama directly. Provide configuration via `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, and `OLLAMA_TIMEOUT` without hard-coding Colab, ngrok, or any public URL. Support Qwen3.5 through configuration without assuming a fixed Ollama tag if the configured server reports a different tag. Preserve non-thinking mode by stripping reasoning blocks from output. Implement robust health checking and error handling for unreachable endpoint, timeout, malformed response, and successful generation. Test with an in-process local HTTP server in pytest, and add a clearly marked manual integration check for testing against live endpoints.
+
+## What changed
+
+- Added `OllamaConfig` and `load_ollama_config` in `aegis/config/schemas.py`:
+  - `base_url`: configured via `OLLAMA_BASE_URL` (default: `http://127.0.0.1:11434`).
+  - `model`: configured via `OLLAMA_MODEL` (default: `qwen2.5:7b`).
+  - `timeout_seconds`: configured via `OLLAMA_TIMEOUT` (default: `60.0`).
+  - `non_thinking`: configured via `OLLAMA_NON_THINKING` (default: `True`).
+  - Explicit keyword arguments override environment variable defaults.
+  - Re-exported in `aegis/config/__init__.py`.
+
+- Added `aegis/router/ollama.py`:
+  - `OllamaHttpRequest` dataclass and `OllamaTransport` callable type.
+  - `_default_ollama_transport`: Robust HTTP transport using `urllib.request` that distinguishes socket/HTTP timeouts (`TimeoutError` / `URLError` with timeout) from unreachable connection errors (`URLError` / `OSError`), HTTP status errors (4xx vs 5xx), and JSON decode errors.
+  - `OllamaHealthStatus` dataclass: Reports health state (`ModelHealth`), reachability, detected server version, and discovered model tags.
+  - `OllamaModelProvider(ModelProvider)`:
+    - Subclasses `ModelProvider` directly, maintaining provider interchangeability.
+    - Supports Ollama native `/api/chat` and `/api/generate` endpoints as well as OpenAI-compatible `/v1/chat/completions`.
+    - `resolve_model_tag`: Resolves requested model ID against configured `OLLAMA_MODEL`, mapped provider models, or discovered server tags. Supports `Qwen3.5` through configuration; matches `:latest` variants, and does not fail or reject if the server reports a different tag.
+    - `_postprocess_text`: Preserves non-thinking mode by stripping `<think>...</think>` tags using `re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)` when enabled (`non_thinking=True`), ensuring no private chain-of-thought is exposed.
+    - `check_health`: Probes `/api/version`, `/api/tags`, or root `/`, populates `OllamaHealthStatus`, and registers available tags.
+    - Error handling: Raises `ModelProviderConnectionError` for unreachable endpoint or timeout, and `ModelProviderResponseError` for malformed JSON, empty output, or Ollama error payloads.
+
+- Re-exported Ollama symbols:
+  - In `aegis/router/providers.py`: Imported and re-exported `OllamaModelProvider`, `OllamaHealthStatus`, `OllamaHttpRequest`, `OllamaTransport`.
+  - In `aegis/router/__init__.py`: Exported all Ollama adapter classes.
+
+- Added tests and manual check utilities:
+  - `tests/test_ollama_provider.py` (23 tests):
+    - Tests configuration parsing, defaults, and env var overrides.
+    - Implements an in-process ephemeral `ThreadingHTTPServer` (`fake_ollama_server` fixture) testing real HTTP calls over `127.0.0.1:0`.
+    - Tests native `/api/chat`, `/api/generate`, and `/v1/chat/completions` generation.
+    - Tests Qwen3.5 tag configuration and flexible server tag resolution.
+    - Tests non-thinking mode reasoning tag stripping and preservation when disabled.
+    - Tests error handling: unreachable endpoint, request timeout, malformed JSON, empty content, HTTP 404, server error payload.
+    - Tests health checking: healthy, unreachable, degraded.
+    - Tests full `Agent → ModelRouter → OllamaModelProvider → Fake Server` integration.
+    - Adds `@pytest.mark.manual` integration test for live endpoints (skipped by default in regular automated runs).
+  - `scripts/check_ollama_endpoint.py`:
+    - Standalone manual check CLI script for live endpoint diagnosis, health verification, ModelProvider test generation, and Agent pipeline checks.
+  - Registered `manual` marker in `pyproject.toml`.
+  - Added `OllamaModelProvider` and `OllamaHealthStatus` assertions in `tests/test_imports.py`.
+
+## Files changed
+
+- `aegis/config/schemas.py`
+- `aegis/config/__init__.py`
+- `aegis/router/ollama.py` (new)
+- `aegis/router/providers.py`
+- `aegis/router/__init__.py`
+- `pyproject.toml`
+- `tests/test_ollama_provider.py` (new)
+- `tests/test_imports.py`
+- `scripts/check_ollama_endpoint.py` (new)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `pytest tests/test_ollama_provider.py -v` → **22 passed, 1 skipped (manual)**
+- `pytest tests/test_imports.py tests/test_model_provider.py -v` → **34 passed**
+- `pytest -q` → **707 passed, 1 skipped** (full repository regression suite, 0 failures, 0 errors).
+- `python scripts/check_ollama_endpoint.py --base-url http://127.0.0.1:19999` → Cleanly handles unreachable endpoint and prints diagnostic report.
+
+## Current status
+
+The AEGIS ModelProvider layer is successfully connected to a configurable Ollama HTTP endpoint via `OllamaModelProvider`. The `ModelProvider` contract remains intact, and the invocation path strictly adheres to `Agent → ModelRouter → ModelProvider → Ollama`. No Colab, ngrok, or public URLs are hardcoded. Non-thinking mode, Qwen3.5 model adaptability, comprehensive error/timeout handling, and health checking are verified across 707 automated tests.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Stop after this task as explicitly requested.
+
+---
 # 2026-09-03 — Phase 6.X Fix Mock Workflow Routing and HITL Approval UI/State Behavior
 
 ## Objective
@@ -245,6 +326,7 @@ None.
 
 Stop after this task as explicitly requested.
 
+---
 # 2026-09-03 — Phase 6.X Network Monitoring Abstraction
 
 ## Objective
@@ -322,6 +404,7 @@ None.
 
 Stop after this task as explicitly requested.
 
+---
 # 2026-09-03 — Phase 6.X Prototype RBAC
 
 ## Objective
