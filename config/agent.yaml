@@ -5,8 +5,8 @@ planning:
   max_plan_steps: 8
   max_observation_chars: 12000
 allowed_modalities:
-  - document
   - spreadsheet
+  - scanned_document
   - image
 default_capabilities:
   - extract_document
