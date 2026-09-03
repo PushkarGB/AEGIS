@@ -74,7 +74,7 @@ class AuthorizedSessionService:
         """
         if user.role == UserRole.ADMIN:
             require_permission(user, Permission.VIEW_ALL_SESSIONS)
-            return self._inner.list_sessions(user_id=user.user_id)
+            return self._inner.list_sessions(user_id=None)
         require_permission(user, Permission.ACCESS_OWN_SESSION)
         return self._inner.list_sessions(user_id=user.user_id)
 

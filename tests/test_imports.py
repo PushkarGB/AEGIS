@@ -255,3 +255,9 @@ def test_security_network_monitoring_is_importable():
     assert callable(classify_destination)
     assert callable(determine_traffic_direction)
     assert callable(is_internal_ip)
+
+
+def test_audit_service_is_importable():
+    from aegis.audit import AuditService, AuthorizedAuditService
+    assert AuditService.__name__ == "AuditService"
+    assert AuthorizedAuditService.__name__ == "AuthorizedAuditService"

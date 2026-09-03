@@ -151,12 +151,18 @@ class SqliteSessionRepository(SessionRepository):
         return _row_to_session(row)
 
     # ------------------------------------------------------------------
-    def list_sessions(self, user_id: str) -> list[SessionRecord]:
-        cur = self._conn.execute(
-            "SELECT session_id, user_id, created_at, updated_at, status "
-            "FROM sessions WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        )
+    def list_sessions(self, user_id: str | None = None) -> list[SessionRecord]:
+        if user_id is None:
+            cur = self._conn.execute(
+                "SELECT session_id, user_id, created_at, updated_at, status "
+                "FROM sessions ORDER BY created_at DESC"
+            )
+        else:
+            cur = self._conn.execute(
+                "SELECT session_id, user_id, created_at, updated_at, status "
+                "FROM sessions WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            )
         return [_row_to_session(row) for row in cur.fetchall()]
 
     # ------------------------------------------------------------------

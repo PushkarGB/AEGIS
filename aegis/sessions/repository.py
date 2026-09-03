@@ -48,11 +48,8 @@ class SessionRepository(ABC):
         """
 
     @abstractmethod
-    def list_sessions(self, user_id: str) -> list[SessionRecord]:
-        """Return all sessions for *user_id*, newest first.
-
-        Returns an empty list when the user has no sessions.
-        """
+    def list_sessions(self, user_id: str | None = None) -> list[SessionRecord]:
+        """Return sessions, newest first. If user_id is None, return all sessions."""
 
     @abstractmethod
     def update_session_status(

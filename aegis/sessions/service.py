@@ -54,8 +54,8 @@ class SessionService:
             raise NotFoundError(f"Session {session_id!s} not found")
         return record
 
-    def list_sessions(self, user_id: str) -> list[SessionRecord]:
-        """Return all sessions for *user_id*, newest first."""
+    def list_sessions(self, user_id: str | None = None) -> list[SessionRecord]:
+        """Return sessions for *user_id* (or all if None), newest first."""
         return self._sessions.list_sessions(user_id=user_id)
 
     def close_session(self, session_id: UUID, user_id: str) -> SessionRecord:
