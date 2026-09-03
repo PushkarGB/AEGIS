@@ -18,6 +18,348 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 5.2 Agent Behavioral Tests with MockModelProvider
+
+## Objective
+
+Prove that the Agent Runtime correctly handles all five core behavioral responsibilities through MockModelProvider, requiring no GPU inference: intent classification, modality classification, plan proposal, observation-based correction, and finish decision.
+
+## What changed
+
+- Added a comprehensive test suite in `tests/test_agent_mock_provider.py` with 31 tests organized into five behavioral proof categories plus cross-cutting MockModelProvider integration proofs:
+  - **Intent classification** (4 tests): Proves the Agent correctly classifies `computation`, `document_drafting`, and `multimodal_analysis` intents from user goals and attachments, and that the full request context (goal text, attachment metadata) reaches the model prompt.
+  - **Modality classification** (7 tests): Proves correct modality classification (`spreadsheet`, `scanned_document`, `image`) across five media types (xlsx, csv, pdf, jpeg, png), rejection of unsupported modalities from model output, and enforcement of valid intent/modality pairs.
+  - **Plan proposal** (7 tests): Proves bounded, workflow-valid capability plans for all three prototype workflows (computation, scanned-document with/without optional `search_knowledge`, multimodal analysis), plus rejection of plans exceeding the step limit, plans with out-of-order capabilities, and plans using unavailable capabilities.
+  - **Observation-based correction** (5 tests): Proves `retry_correct` directive from sandbox execution errors, `continue` after successful steps, `verify` after successful execution, that error context is preserved in model prompts, and that actions outside `allowed_next_actions` are rejected.
+  - **Finish decision** (4 tests): Proves `finish` directive with `done=true` after verification, `request_approval` for document workflows requiring human approval, rejection of finish without `done=true`, and rejection of premature `done=true` on non-finish directives.
+  - **MockModelProvider integration** (4 tests): Proves zero network/GPU requirement, `response_factory` for dynamic scenario-specific responses, JSON schema delivery in the system prompt, and a complete agent lifecycle (intent → plan → continue → retry_correct → finish) through a single sequential MockModelProvider.
+
+## Files changed
+
+- `tests/test_agent_mock_provider.py` (new)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_agent_mock_provider.py -v -p no:cacheprovider` → 31 passed
+- `python -m pytest tests -q -p no:cacheprovider` → 180 passed
+
+## Current status
+
+Complete. All five core Agent behaviors are proven through MockModelProvider with no GPU inference, no network calls, and no changes to existing source code.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 5.3 — Integrate `RouterAgentRuntime` outputs into the orchestration flow so the Controller can consume structured Agent understanding, plans, and observation decisions without giving the Agent direct execution authority.
+
+---
+# 2026-09-03 — Phase 5.1 Structured Agent Runtime Interface
+
+## Objective
+
+Implement the first real Agent Runtime slice using structured request/response schemas, with all model communication constrained to `ModelRouter -> ModelProvider`, and no direct tool or concrete runtime execution from the Agent.
+
+## What changed
+
+- Added a new `aegis.agent` runtime surface with strict structured schemas for:
+  - request understanding (`IntentAnalysisRequest`, `IntentAnalysisResult`);
+  - bounded plan proposal (`PlanGenerationRequest`, `PlanProposal`, `CapabilityPlanStep`);
+  - observation reasoning (`ObservationReasoningRequest`, `ObservationDecision`, `PreviousExecutionContext`).
+- Added explicit Agent enums for prototype intent, modality, and Controller-facing directives:
+  - `computation`
+  - `document_drafting`
+  - `multimodal_analysis`
+  - `spreadsheet`
+  - `scanned_document`
+  - `image`
+  - `continue`
+  - `retry_correct`
+  - `verify`
+  - `finish`
+  - `request_approval`
+- Added the abstract `AgentRuntime` interface plus a concrete `RouterAgentRuntime` implementation that:
+  - routes semantic Agent work only through `ModelRouter`;
+  - resolves the selected `ModelProvider` by routed provider ID;
+  - builds JSON-only prompts with explicit response schemas;
+  - validates model outputs against strict Pydantic contracts;
+  - never invokes capabilities, tools, or concrete model runtimes directly.
+- Implemented structured intent and modality decision suitable for Controller workflow selection, with prototype-valid intent/modality/workflow combinations enforced at the schema layer.
+- Implemented structured plan generation as a bounded sequence of proposed capability requests, validated against:
+  - configured plan-step limits;
+  - available capability names;
+  - Controller-compatible workflow ordering;
+  - required prototype workflow steps.
+- Implemented structured observation reasoning that returns a Controller-facing directive and optional proposed `AgentDecision`, while keeping reasoning private and disallowing invalid directive/action combinations.
+- Updated the repository agent config so the Agent’s allowed modalities now explicitly include `scanned_document`.
+- Added focused runtime tests proving the new Agent layer operates through `ModelRouter -> ModelProvider` and returns validated structured outputs without executing arbitrary tools.
+
+## Files changed
+
+- `aegis/agent/__init__.py`
+- `aegis/agent/runtime.py`
+- `aegis/agent/schemas.py`
+- `config/agent.yaml`
+- `tests/test_agent_runtime.py`
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_agent_runtime.py tests/test_imports.py tests/test_schemas.py tests/test_controller.py -q -p no:cacheprovider` → 24 passed
+- `python -m compileall aegis` → passed
+- `python -m pytest tests -q -p no:cacheprovider` → 149 passed
+
+## Current status
+
+Complete. The Agent now has a structured runtime interface for intent detection, bounded plan proposal, and observation reasoning, and all model access stays behind `ModelRouter -> ModelProvider`.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 5.2 — Integrate `RouterAgentRuntime` outputs into the orchestration flow so the Controller can consume structured Agent understanding, plans, and observation decisions without giving the Agent direct execution authority.
+
+---
+# 2026-09-03 — Phase 4.3 Provider Substitution Integration Test
+
+## Objective
+
+Prove that the Agent-facing model invocation path can switch between `MockModelProvider`, `LocalModelProvider`, and `APIModelProvider` without changing Agent, Controller, or Broker logic.
+
+## What changed
+
+- Added an integration test suite in `tests/test_provider_substitution.py` that exercises the end-to-end model invocation path: `Agent consumer -> ModelRouter -> ModelProvider -> ExecutionController -> CapabilityBroker -> CapabilityRegistry`.
+- Verified full-workflow execution on the Computation Workflow (`inspect_spreadsheet -> generate_code -> run_code -> verify_result -> generate_excel -> finish`), proving that `MockModelProvider`, `LocalModelProvider`, and `APIModelProvider` drive identical action sequences, state transitions, and deliverable generation without altering Agent, Controller, or Broker code.
+- Demonstrated dynamic mid-task provider substitution (handoff), proving that the active model provider can be swapped between workflow steps without disrupting Controller state, Broker capabilities, or verification gates.
+- Demonstrated deterministic heterogeneous provider dispatch via `ModelRouter`, routing `general_reasoning` to mock, `code_generation` to local, and `visual_reasoning` to temporary API providers within a single Agent session.
+- Validated the bounded agentic error recovery loop (`ACT -> OBSERVE ERROR -> REASON -> CORRECT -> ACT`), proving that failure recovery operates identically regardless of provider implementation.
+- Verified error isolation at the provider boundary: connectivity errors and runtime environment policy restrictions fail cleanly before reaching or corrupting Controller execution state.
+- Preserved all architectural invariants: offline hermetic test execution with zero external network egress, strict protocol adherence for OpenAI-compatible adapters, and Controller ownership of authoritative task state.
+
+## Files changed
+
+- `tests/test_provider_substitution.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_provider_substitution.py -v` → 10 passed
+- `python -m pytest -v -p no:cacheprovider` → 142 passed
+
+## Current status
+
+Complete. Provider substitution across `MockModelProvider`, `LocalModelProvider`, and `APIModelProvider` is proven via integration tests with zero changes to Agent, Controller, or Broker logic.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 5.1 — Begin real Agent integration only through `ModelRouter` → `ModelProvider`, keeping Controller/Broker execution ownership unchanged.
+
+---
+# 2026-09-03 — Phase 4.2 Provider Protocol Neutrality Review
+
+## Objective
+
+Verify that the Phase 4 model-provider boundary remains model-family and provider agnostic, with OpenAI-compatible HTTP retained as one adapter type rather than an architectural requirement.
+
+## What changed
+
+- Kept `ModelProvider` unchanged as the sole higher-level generation contract.
+- Made `ModelProviderConfig.kind` extensible and stopped requiring an HTTP endpoint from registry metadata, so future native SDK and direct local-inference adapters can be configured without fitting a `local`/`api`/`mock` taxonomy.
+- Moved endpoint validation to the existing OpenAI-compatible adapter, where the HTTP chat-completions protocol is actually required.
+- Documented that `LocalModelProvider` and `APIModelProvider` are protocol-specific adapters beneath the neutral boundary, not the only supported integration mechanism.
+- Added a non-HTTP native-runtime test provider and verified the same Agent-facing consumer works unchanged with mock, native-protocol, local HTTP-compatible, and temporary API HTTP-compatible providers.
+
+No new provider integration, provider SDK, external call, or higher-level architecture change was added.
+
+## Files changed
+
+- `aegis/config/schemas.py`
+- `aegis/router/providers.py`
+- `tests/test_model_provider.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_model_provider.py tests/test_model_registry.py tests/test_model_router.py tests/test_imports.py tests/test_config.py -q -p no:cacheprovider` → 106 passed
+
+## Current status
+
+Complete. Protocol-specific assumptions are confined to the existing OpenAI-compatible adapter, and higher-level consumers remain independent of provider protocol.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 5.1 — Begin real Agent integration only through `ModelRouter` → `ModelProvider`, keeping Controller/Broker execution ownership unchanged.
+
+---
+# 2026-09-03 — Phase 4.1 Mock, Local, and Temporary API Model Providers
+
+## Objective
+
+Implement deterministic mock, local OpenAI-compatible, and temporary API OpenAI-compatible `ModelProvider` adapters without changing higher-level application boundaries.
+
+## What changed
+
+- Added concrete provider adapters in `aegis/router/providers.py`:
+  - `MockModelProvider` for deterministic in-memory responses suitable for Agent-facing tests.
+  - `LocalModelProvider` as a local OpenAI-compatible adapter boundary for endpoints such as Ollama, without hard-coding Ollama-specific logic.
+  - `APIModelProvider` as a provider-neutral OpenAI-compatible adapter marked for development/testing only and guarded by runtime policy.
+- Added provider error types for configuration, connectivity, malformed responses, and temporary API policy violations so higher-level callers can fail cleanly without depending on transport details.
+- Kept the shared `ModelProvider` contract unchanged; all three adapters implement the same synchronous `generate(ModelGenerationRequest) -> ModelGenerationResult` interface.
+- Extended configuration schemas so endpoint/model selection stays outside business logic:
+  - `ModelConfig.provider_model_id` allows the configured provider-side model name to differ from the internal AEGIS model ID.
+  - `ModelProviderConfig.api_key_env_var` optionally supplies bearer-token auth through environment configuration rather than code.
+- Updated `config/models.yaml` placeholder entries with explicit `provider_model_id` mappings for the configured local provider.
+- Expanded `tests/test_model_provider.py` to prove higher-level consumers only require `ModelProvider` by swapping mock, local, and temporary API implementations behind the same consumer helper.
+- Added mocked local/API adapter tests covering request payload construction, configured endpoint/model selection, auth header wiring, connectivity failures, malformed responses, and temporary API runtime restrictions.
+- Updated `aegis/router/__init__.py` and `tests/test_imports.py` to expose and verify the new provider adapters and error classes.
+
+No live model service, no external provider SDK, no Controller/Broker/workflow redesign, and no confidential-data integration was added.
+
+## Files changed
+
+- `aegis/config/schemas.py`
+- `aegis/router/providers.py`
+- `aegis/router/__init__.py`
+- `config/models.yaml`
+- `tests/test_model_provider.py`
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_model_provider.py tests/test_imports.py tests/test_config.py -q -p no:cacheprovider` → 25 passed
+- `python -m pytest tests/test_model_provider.py tests/test_model_registry.py tests/test_model_router.py tests/test_imports.py tests/test_config.py -q -p no:cacheprovider` → 104 passed
+
+## Current status
+
+Phase 4.1 complete. AEGIS now has interchangeable mock, local, and temporary API provider adapters behind the stable `ModelProvider` boundary, with configuration-driven endpoint/model selection and mocked transport coverage.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 5.1 — Begin real Agent integration only through `ModelRouter` → `ModelProvider`, using the existing provider-neutral boundary and keeping Controller/Broker execution ownership unchanged.
+
+---
+# 2026-09-03 — Phase 3.2 Model Router Validation and Edge Case Testing
+
+## Objective
+
+Validate the deterministic Model Router across correct task-to-model routing, unsupported capabilities, unavailable models, fallback handling, malformed registry entries, and auditable routing reasons.
+
+## What changed
+
+- Extended `ModelRegistry` with `_is_available` incorporating `ModelHealth.UNAVAILABLE` and added `get_models_for_capability(capability: str)`.
+- Extended `ModelRouter.route()` with optional `required_capability: str | None = None` support, allowing deterministic filtering by model capability and capability-aware fallback with explanatory routing reasons.
+- Added comprehensive unit and edge-case tests in `tests/test_model_router.py` and `tests/test_model_registry.py` covering:
+  - **Correct task-to-model routing**: verified `general_reasoning` and `drafting` route to Agent model, `code_generation` routes to Coding model, `visual_reasoning` and `image_analysis` route to Vision model; verified explicit role override; verified strict determinism across repeated invocations.
+  - **Unsupported capability**: verified unknown task types raise `RoutingError`, unsupported `required_capability` requirements raise `RoutingError`, and capability requirements properly filter candidates.
+  - **Unavailable model**: verified models with `available=False`, `enabled=False`, or `health=ModelHealth.UNAVAILABLE` are excluded from selection; verified `RoutingError` when all models for a role are unavailable.
+  - **Fallback handling**: verified `FallbackInfo` population with alternative candidates, fallback when default is unavailable/unhealthy, fallback when default lacks a required capability, and `None` fallback when only one model exists.
+  - **Malformed registry entry**: verified `ValidationError` on invalid model IDs, missing fields, duplicate roles/models, unknown provider references, enabled models on disabled providers, and invalid role defaults; verified runtime `RoutingError` if a model's provider is missing from the registry.
+  - **Auditable routing reason**: verified detailed reason format, traceability of origin and selection, inclusion of modality and capability hints, and immutability (`frozen=True`) of `RoutingDecision` preventing tampering.
+
+## Files changed
+
+- `aegis/router/registry.py`
+- `aegis/router/router.py`
+- `tests/test_model_registry.py`
+- `tests/test_model_router.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 120 passed
+
+## Current status
+
+Phase 3.2 complete. Model Router is rigorously tested and validated across all failure modes, fallback paths, registry validations, and audit traceability requirements.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 4.1 — Define local provider adapter shape and implement `MockModelProvider` for integration testing; verify provider swapping leaves Controller/Broker/workflows unchanged.
+
+---
+# 2026-09-03 — Phase 3.1 Model Registry + Deterministic Router
+
+## Objective
+
+Implement a rich model registry with full model metadata (identity, role, capabilities, modality, task types, provider, context, resource metadata, health) backed by externalized configuration, and a deterministic, explainable model router mapping task types to model roles.
+
+## What changed
+
+- Expanded `ModelConfig` with rich metadata fields: `name` (human-readable identity), `capabilities`, `modalities`, `task_types`, `parameters`, `quantization`, `available`, and `health`.
+- Added `ModelHealth` enum (`unknown`, `healthy`, `degraded`, `unavailable`) to `aegis.config.schemas`.
+- Added uniqueness validators for `capabilities`, `modalities`, and `task_types` on `ModelConfig`.
+- Enriched `config/models.yaml` with full model definitions for the agent, coding, and vision placeholder models.
+- Added `ModelRegistry` at `aegis/router/registry.py` providing deterministic, read-only lookups:
+  - Single model/provider lookups by ID.
+  - Role-based model listing with enabled/available filtering.
+  - Default model resolution per role.
+  - Declaration-order-preserving listing with optional filters.
+- Added `ModelRouter` at `aegis/router/router.py` with deterministic routing rules:
+  - `general_reasoning` / `drafting` → role `agent`.
+  - `code_generation` → role `coding`.
+  - `visual_reasoning` / `image_analysis` → role `vision`.
+  - Explicit role override bypasses task-type mapping.
+  - Returns `RoutingDecision` with `model_id`, `provider_id`, `role`, human-readable `reason`, and optional `FallbackInfo`.
+  - Falls back to alternative models when the configured default is unavailable.
+  - Raises `RoutingError` for unresolvable requests.
+- Updated `aegis/router/__init__.py` to export `ModelRegistry`, `ModelRouter`, `RoutingDecision`, `FallbackInfo`, `RoutingError`.
+- Updated `aegis/config/__init__.py` to export `ModelHealth`.
+
+No real model connectivity, concrete provider implementations, learned routing, or semantic routing was added. Controller/Broker boundaries are unchanged.
+
+## Files changed
+
+- `config/models.yaml`
+- `aegis/config/schemas.py`
+- `aegis/config/__init__.py`
+- `aegis/router/registry.py` (new)
+- `aegis/router/router.py` (new)
+- `aegis/router/__init__.py`
+- `tests/test_model_registry.py` (new)
+- `tests/test_model_router.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 87 passed
+
+## Current status
+
+Phase 3.1 complete. The model registry provides deterministic access to enriched model definitions from external configuration. The router selects models via explainable deterministic rules and returns structured routing decisions with fallback information.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 4.1 — Define local provider adapter shape and implement `MockModelProvider` for integration testing; verify provider swapping leaves Controller/Broker/workflows unchanged.
+
+---
 # 2026-09-03 — Repository Git Initialization and Commit History Baseline
 
 ## Objective
@@ -571,7 +913,8 @@ User request + file
 - [x] Implement provider-neutral TaskState schema (typed statuses, records, limits)
 - [x] Implement Execution Controller
 - [x] Implement registry-backed Capability Broker resolution/invocation
-- [ ] Implement Model Registry/Router (beyond validated external configuration)
+- [x] Implement Model Registry/Router (beyond validated external configuration)
+- [ ] Implement Mock providers and integration tests
 
 ### Not started
 
@@ -735,7 +1078,7 @@ When switching from Codex → Cursor → Antigravity or vice versa:
 
 ## Next Task
 
-**Phase 3.1 — Implement deterministic model registry access and Router selection.**
+**Phase 4.1 — Define local provider adapter shape and implement `MockModelProvider` for integration testing.**
 
-The next coding agent must read `ARCHITECTURE.md`, `DEV_LOG.md`, the external model configuration, `ModelProvider` interface, capability metadata, and existing tests; implement deterministic model-role selection and explainable routing without concrete model connectivity; retain mock-only provider implementations; preserve Controller/Broker boundaries; update this file; and stop after this task.
+The next coding agent must read `ARCHITECTURE.md`, `DEV_LOG.md`, the `ModelProvider` interface, `ModelRegistry`, `ModelRouter`, and existing tests; implement a local provider adapter shape and a `MockModelProvider`; verify provider swapping leaves Controller/Broker/workflows unchanged; update this file; and stop after this task.
 
