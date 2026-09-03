@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -50,40 +51,90 @@ class AgentConfig(BaseModel):
 
 
 class ModelProviderConfig(BaseModel):
-    """Externalized provider metadata for later router/provider phases."""
+    """Externalized, adapter-neutral provider metadata.
+
+    ``kind`` identifies a configured adapter type but is deliberately open-ended:
+    the registry must also support future native SDK and direct local-inference
+    adapters that do not use an HTTP endpoint.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1, pattern=IDENTIFIER_PATTERN)
-    kind: Literal["local", "api", "mock"]
+    kind: str = Field(min_length=1, pattern=IDENTIFIER_PATTERN)
     enabled: bool = True
     endpoint: str | None = None
+    api_key_env_var: str | None = Field(default=None, min_length=1)
     timeout_seconds: int = Field(default=60, ge=1, le=600)
 
-    @model_validator(mode="after")
-    def validate_endpoint_requirements(self) -> "ModelProviderConfig":
-        if self.kind in {"local", "api"} and not self.endpoint:
-            raise ValueError("local and api providers require an endpoint")
-        if self.kind == "mock" and self.endpoint is not None:
-            raise ValueError("mock providers must not define an endpoint")
-        return self
+
+class ModelHealth(StrEnum):
+    """Observable health state for a registered model."""
+
+    UNKNOWN = "unknown"
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
 
 
 class ModelConfig(BaseModel):
-    """Per-model registry entry."""
+    """Per-model registry entry with full identity, capability, and health metadata."""
 
     model_config = ConfigDict(extra="forbid")
 
+    # Identity / name
     id: str = Field(min_length=1, pattern=IDENTIFIER_PATTERN)
+    name: str | None = Field(default=None, min_length=1)
+
+    # Provider / runtime
     provider: str = Field(min_length=1, pattern=IDENTIFIER_PATTERN)
+    provider_model_id: str | None = Field(default=None, min_length=1)
+
+    # Role
     roles: list[str] = Field(min_length=1)
+
+    # Capabilities
+    capabilities: list[str] = Field(default_factory=list)
+
+    # Modality
+    modalities: list[str] = Field(default_factory=list)
+
+    # Supported task types
+    task_types: list[str] = Field(default_factory=list)
+
+    # Enabled flag
     enabled: bool = True
+
+    # Context information
     context_window: int | None = Field(default=None, ge=1)
+
+    # Resource metadata
+    parameters: str | None = Field(default=None, min_length=1)
+    quantization: str | None = Field(default=None, min_length=1)
+
+    # Availability / health metadata
+    available: bool = True
+    health: ModelHealth = ModelHealth.UNKNOWN
 
     @field_validator("roles")
     @classmethod
     def validate_roles(cls, value: list[str]) -> list[str]:
         return _ensure_unique(value, "roles")
+
+    @field_validator("capabilities")
+    @classmethod
+    def validate_capabilities(cls, value: list[str]) -> list[str]:
+        return _ensure_unique(value, "capabilities")
+
+    @field_validator("modalities")
+    @classmethod
+    def validate_modalities(cls, value: list[str]) -> list[str]:
+        return _ensure_unique(value, "modalities")
+
+    @field_validator("task_types")
+    @classmethod
+    def validate_task_types(cls, value: list[str]) -> list[str]:
+        return _ensure_unique(value, "task_types")
 
 
 class ModelRegistryConfig(BaseModel):

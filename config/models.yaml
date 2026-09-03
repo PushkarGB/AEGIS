@@ -12,23 +12,67 @@ providers:
 
 models:
   - id: agent_model_placeholder
+    name: "Qwen3-8B Agent"
     provider: local_stub
+    provider_model_id: qwen3-8b-agent
     roles:
       - agent
+    capabilities:
+      - text_generation
+      - reasoning
+      - planning
+      - drafting
+    modalities:
+      - text
+    task_types:
+      - general_reasoning
+      - drafting
     enabled: true
     context_window: 8192
+    parameters: "8B"
+    quantization: null
+    available: true
+    health: unknown
   - id: coding_model_placeholder
+    name: "Code Model"
     provider: local_stub
+    provider_model_id: local-coding-model
     roles:
       - coding
+    capabilities:
+      - text_generation
+      - code_generation
+    modalities:
+      - text
+    task_types:
+      - code_generation
     enabled: true
     context_window: 8192
+    parameters: null
+    quantization: null
+    available: true
+    health: unknown
   - id: vision_model_placeholder
+    name: "Vision Model"
     provider: local_stub
+    provider_model_id: local-vision-model
     roles:
       - vision
+    capabilities:
+      - text_generation
+      - image_understanding
+    modalities:
+      - text
+      - image
+    task_types:
+      - visual_reasoning
+      - image_analysis
     enabled: true
     context_window: 8192
+    parameters: null
+    quantization: null
+    available: true
+    health: unknown
 
 role_defaults:
   agent: agent_model_placeholder
