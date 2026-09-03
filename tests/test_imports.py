@@ -14,7 +14,7 @@ import aegis.sessions
 import aegis.skills
 import aegis.schemas
 from aegis.router.provider import ModelGenerationRequest, ModelGenerationResult, ModelProvider
-from aegis.broker import CapabilityBroker
+from aegis.broker import CapabilityBroker, RegistryCapabilityBroker
 from aegis.capabilities import Capability, CapabilityRegistry
 from aegis.orchestration import ExecutionController, WorkflowName
 
@@ -47,6 +47,7 @@ def test_model_provider_interface_is_importable():
 
 def test_orchestration_and_broker_interfaces_are_importable():
     assert CapabilityBroker.__name__ == "CapabilityBroker"
+    assert RegistryCapabilityBroker.__name__ == "RegistryCapabilityBroker"
     assert Capability.__name__ == "Capability"
     assert CapabilityRegistry.__name__ == "CapabilityRegistry"
     assert ExecutionController.__name__ == "ExecutionController"

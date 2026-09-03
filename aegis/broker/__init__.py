@@ -1,5 +1,5 @@
 """Capability Broker: resolve named capabilities; Agent never invokes tools directly."""
 
-from .broker import CapabilityBroker
+from .broker import CapabilityBroker, RegistryCapabilityBroker
 
-__all__ = ["CapabilityBroker"]
+__all__ = ["CapabilityBroker", "RegistryCapabilityBroker"]

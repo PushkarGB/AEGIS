@@ -19,6 +19,49 @@ After each meaningful implementation task, update this file with:
 
 ---
 
+# 2026-09-03 — Phase 2.2 Registry-Backed Capability Broker
+
+## Objective
+
+Implement Broker resolution and invocation through the configured capability registry, with test-only mock capabilities and controlled unavailable-capability results.
+
+## What changed
+
+- Added `RegistryCapabilityBroker`, a concrete implementation of the existing `CapabilityBroker` boundary.
+- The Broker resolves capability requests through `CapabilityRegistry` and invokes only enabled, registered implementations.
+- Unknown, disabled, and configured-but-unregistered capabilities now return controlled `rejected` `CapabilityResult` values instead of raising or invoking an implementation.
+- Unexpected implementation exceptions are converted into controlled failed results at the Broker boundary.
+- Added test-only mock capabilities for successful execution, controlled failure, and observation-producing execution. These live only in `tests/test_broker.py`.
+- Added Controller/Broker integration coverage proving observations from a registered mock capability are recorded in controller-owned `TaskState`.
+
+No real document, model, sandbox, knowledge, or artifact-generation capabilities were added.
+
+## Files changed
+
+- `aegis/broker/broker.py`
+- `aegis/broker/__init__.py`
+- `tests/test_broker.py`
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests -q -p no:cacheprovider` → 40 passed
+
+## Current status
+
+Phase 2.2 complete. The Controller can use the Broker without any knowledge of concrete capability implementations, and the Broker permits only registered capabilities to execute.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Phase 3.1 — Implement deterministic model registry access and Router selection from external model configuration; retain mock-only provider implementations.
+
+---
+
 # 2026-09-02 — Phase 2.1 Capability Interface and Configured Registry
 
 ## Objective
@@ -649,4 +692,3 @@ When switching from Codex → Cursor → Antigravity or vice versa:
 **Phase 3.1 — Implement deterministic model registry access and Router selection.**
 
 The next coding agent must read `ARCHITECTURE.md`, `DEV_LOG.md`, the external model configuration, `ModelProvider` interface, capability metadata, and existing tests; implement deterministic model-role selection and explainable routing without concrete model connectivity; retain mock-only provider implementations; preserve Controller/Broker boundaries; update this file; and stop after this task.
-
