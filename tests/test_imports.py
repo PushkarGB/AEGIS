@@ -261,3 +261,9 @@ def test_audit_service_is_importable():
     from aegis.audit import AuditService, AuthorizedAuditService
     assert AuditService.__name__ == "AuditService"
     assert AuthorizedAuditService.__name__ == "AuthorizedAuditService"
+
+
+def test_ui_package_is_importable():
+    from aegis.ui import UIBackendService, create_app
+    assert UIBackendService.__name__ == "UIBackendService"
+    assert callable(create_app)

@@ -18,6 +18,233 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 6.X Fix Mock Workflow Routing and HITL Approval UI/State Behavior
+
+## Objective
+
+Fix mock workflow-routing behavior so that unknown, unsupported, or ambiguous user inputs (e.g., "Hello") return a clear unsupported request result rather than randomly picking a workflow and fabricating execution outputs. Fix HITL approval state governance and Gradio UI behavior so that approval controls become hidden/disabled upon decision, clear final statuses ("Approved" / "Rejected" without describing task as "cancelled") are presented, backend state, UI state, and audit state agree, and invalid repeated transitions (approve twice, reject twice, approve after reject, reject after approve) are rejected by the backend Controller.
+
+## What changed
+
+- Modified `aegis/ui/runner.py`:
+  - `_infer_workflow`: Deterministically resolves known supported computation requests (spreadsheet extensions or computation keywords), known supported document requests (PDF extension or approval/OCR keywords), and known supported multimodal requests (image extensions or photo keywords). If multiple contradictory indicators match or if no supported workflow matches (e.g., "Hello"), returns `None` instead of defaulting to `COMPUTATION`.
+  - `start_execution`: When `_infer_workflow` returns `None`, halts execution without initializing a workflow controller or fabricating outputs, emits `TASK_STARTED` and `TASK_FAILED` events, and returns `ExecutionRunResult` with `workflow_id="none"`, `final_status=FinalStatus.FAILED`, and descriptive `result_text` explaining supported tasks.
+  - `record_approval`: Validates `controller.record_approval(...)` event status; if rejected by Controller (`ExecutionEventStatus.REJECTED`), raises `ValueError`. On rejection, updates deliverable text to `"Task was rejected by operator.\n\n[Status: REJECTED]"` without describing task as cancelled.
+- Modified `aegis/orchestration/controller.py`:
+  - In `record_approval`: Refined rejection observation to `"Human approval was rejected; task rejected."` and event summary to `"Human rejection recorded."`, ensuring descriptive text does not describe task as cancelled.
+- Modified `aegis/ui/app.py`:
+  - Added module-level `handle_approval_decision(approved, current_state, backend)`:
+    - Calls `backend.record_approval`.
+    - Hides and disables `approve_btn` (`visible=False, interactive=False`) and `reject_btn` (`visible=False, interactive=False`).
+    - Hides `approval_banner` (`visible=False`).
+    - Displays `approval_result_msg` with clear final decision ("Approved" / "Rejected").
+    - Catches and displays any backend rejection errors without UI crash while keeping controls disabled.
+    - Clears `active_task_id` in state.
+  - In `handle_submit_task`, properly resets approval controls and banner to visible and interactive when entering `WAITING_FOR_APPROVAL`.
+- Added tests:
+  - `tests/test_workflow_routing.py` (8 tests):
+    - Known computation request routes to `WorkflowName.COMPUTATION`.
+    - Known computation without attachment routes to `WorkflowName.COMPUTATION`.
+    - Known document request routes to `WorkflowName.SCANNED_DOCUMENT_APPROVAL`.
+    - Known multimodal request routes to `WorkflowName.MULTIMODAL_ANALYSIS`.
+    - Unknown "Hello" request is rejected with `final_status=FinalStatus.FAILED`, `workflow_id="none"`, and no random workflow selection.
+    - Arbitrary unknown requests ("Tell me a joke", "What is the capital of France?", etc.) do not route randomly.
+    - Repeated identical unknown requests produce identical results (deterministic).
+    - Ambiguous conflicting requests return unsupported/ambiguous result.
+  - `tests/test_hitl_transitions.py` (15 tests):
+    - Controller level: approve once, reject once, approve twice rejected, reject twice rejected, approve after reject rejected, reject after approve rejected.
+    - Service level: approve once, reject once, approve twice rejected, reject twice rejected, approve after reject rejected, reject after approve rejected.
+    - UI level: UI reflects final state on approve (controls hidden/disabled), UI reflects final state on reject (controls hidden/disabled, clearly says Rejected and not cancelled), repeated approval decision rejected and controls remain disabled.
+
+## Files changed
+
+- `aegis/ui/runner.py`
+- `aegis/orchestration/controller.py`
+- `aegis/ui/app.py`
+- `tests/test_workflow_routing.py` (new)
+- `tests/test_hitl_transitions.py` (new)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `pytest tests/test_workflow_routing.py tests/test_hitl_transitions.py -v` → **23 passed**
+- `pytest -q` → **685 passed** (full repository regression suite, 0 failures, 0 errors).
+
+## Current status
+
+Mock workflow routing is strictly deterministic and rejects unknown/ambiguous requests without fabricating workflows or outputs. HITL state machine and UI behavior enforce state transitions, hide/disable controls upon decision, reject repeated attempts at the Controller/backend boundary, and maintain synchronization between backend, UI, and audit state. ModelProvider architecture is completely untouched.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Stop after this fix as explicitly requested.
+
+---
+# 2026-09-03 — Phase 6.X Connect Execution Event Streaming to UI
+
+## Objective
+
+Connect the real execution-event stream to the USER Gradio UI. Events must progressively display high-level labels (e.g. "Understanding request", "Workflow selected", "Inspecting workbook", "Running sandbox", "Verifying result", "Preparing deliverable", "Awaiting approval", "Completed"). No chain-of-thought is exposed. Events originate from the backend `ExecutionController` → `ExecutionEventPublisher` pipeline. Per-user/session event isolation is enforced by a `SessionEventCollector` that filters by `(session_id, task_id, user_id)`. Mock events are paced with realistic timing; real `LocalModelProvider` / `OllamaProvider` paths are unaffected.
+
+## What changed
+
+- Added `aegis/ui/event_stream.py`:
+  - `MOCK_EVENT_PACE_SECONDS` — configurable delay (0.35s) consumed only by `DeterministicTaskRunner`; real model providers never see this delay.
+  - `_EVENT_LABELS` / `_CAPABILITY_LABELS` — mapping from `ExecutionEventType` and `capability_id` to human-friendly UI labels.
+  - `event_label(event)` — returns the best human-friendly label for any `ExecutionEvent`.
+  - `SessionEventCollector` — thread-safe per-task event sink that subscribes to `ExecutionEventPublisher` and retains only events matching the specified `(session_id, task_id, user_id)` identity. Supports `drain()` (returns and clears) and `all_events()` (read-only copy). Guarantees one user's stream cannot leak to another.
+  - `format_progressive_events(events)` — cumulative Markdown formatter with status emoji indicators and label deduplication.
+
+- Modified `aegis/ui/runner.py`:
+  - Added `event_pace_seconds` constructor parameter to `DeterministicTaskRunner` (default: `MOCK_EVENT_PACE_SECONDS`).
+  - Inserted `time.sleep(event_pace_seconds)` between each mock step execution in `_run_steps()` for all workflow types (COMPUTATION, SCANNED_DOCUMENT_APPROVAL, MULTIMODAL_ANALYSIS).
+  - Pacing only exists in the mock/demo path; `ExecutionController`, `ExecutionEventPublisher`, `AgentRuntime`, and real `ModelProvider` are unmodified.
+  - Tests use `event_pace_seconds=0.0` for fast execution.
+
+- Modified `aegis/ui/service.py`:
+  - Added `UIStreamUpdate` dataclass for incremental streaming updates.
+  - Added `event_publisher` property for `SessionEventCollector` access.
+  - Added `submit_task_streaming()` generator method that: registers a per-task `SessionEventCollector`, runs execution in a background thread with pacing, yields `UIStreamUpdate` objects with cumulative event Markdown as events arrive, and yields a final update with the complete `UITaskResult`.
+  - The synchronous `submit_task()` remains unchanged (uses `event_pace_seconds=0.0`) for backward compatibility.
+
+- Modified `aegis/ui/app.py`:
+  - Changed `handle_submit_task` from a regular function to a Gradio generator (yields) for progressive UI updates.
+  - Intermediate yields update the events display with cumulative Markdown.
+  - Final yield includes chat history, result text, and HITL state.
+  - Imported `format_progressive_events` and `UIStreamUpdate` from the new module.
+
+- Updated `aegis/ui/__init__.py`:
+  - Re-exported `MOCK_EVENT_PACE_SECONDS`, `SessionEventCollector`, `UIStreamUpdate`, `event_label`, `format_progressive_events`.
+
+- Added `tests/test_event_streaming.py` (12 tests):
+  - `test_progressive_events_computation` — computation task produces events with human-friendly labels.
+  - `test_progressive_events_preserve_identity` — every event carries correct `session_id`, `task_id`, `user_id`.
+  - `test_event_isolation_between_users` — `SessionEventCollector` isolates alice's and bob's events.
+  - `test_collector_isolates_by_identity` — direct collector unit test with identity filtering.
+  - `test_event_labels_no_chain_of_thought` — no forbidden fragments in labels.
+  - `test_approval_workflow_streaming` — HITL events stream with "Awaiting approval" label.
+  - `test_collector_drain_clears` — `drain()` returns events exactly once.
+  - `test_collector_all_events_does_not_clear` — `all_events()` preserves buffer.
+  - `test_streaming_submit_task_yields` — generator yields incremental `UIStreamUpdate` objects.
+  - `test_streaming_approval_workflow_yields_hitl` — streaming approval workflow pauses at HITL.
+  - `test_format_progressive_events_empty` — empty list yields waiting message.
+  - `test_format_progressive_events_deduplicates` — duplicate labels deduplicated.
+
+## Files changed
+
+- `aegis/ui/event_stream.py` (new)
+- `aegis/ui/runner.py`
+- `aegis/ui/service.py`
+- `aegis/ui/app.py`
+- `aegis/ui/__init__.py`
+- `tests/test_event_streaming.py` (new)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `pytest tests/test_event_streaming.py -v` → **12 passed**
+- `pytest tests/test_ui_service.py -v` → **15 passed**
+- `pytest tests/test_gradio_app.py -v` → **3 passed**
+- `pytest tests/test_imports.py -v` → **16 passed**
+- `pytest -q` → **662 passed** (full repository regression suite, 0 failures, 0 errors).
+
+## Current status
+
+Phase 6.X event streaming complete. Execution events from the backend runtime are progressively streamed to the Gradio UI with human-friendly labels, per-user/session isolation, and mock-only pacing. No chain-of-thought is exposed. All tests use `MockModelProvider`; no Ollama required.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Stop after this task as explicitly requested.
+
+---
+# 2026-09-03 — Phase 6.X Gradio Application Shell
+
+## Objective
+
+Implement the initial AEGIS Gradio application shell providing a unified application with role-based views (`USER` and `ADMIN`). Enforce zero business logic in UI callbacks, route all operations through backend services, use deterministic mock execution doubles without cloud or heavy model calls, isolate mock/demo data, and enforce RBAC guards at the service boundary.
+
+## What changed
+
+- Added `aegis/audit/service.py` and updated `aegis/audit/__init__.py`:
+  - `AuditService`: thread-safe in-memory store for `ExecutionEvent` audit records with filter queries and sink compatibility (`__call__`).
+  - `AuthorizedAuditService`: RBAC facade enforcing `Permission.VIEW_ALL_AUDIT`.
+
+- Added `aegis/ui/runner.py`:
+  - `DeterministicTaskRunner`: coordinates mock workflow execution through the authoritative `ExecutionController`.
+  - Supports `COMPUTATION`, `SCANNED_DOCUMENT_APPROVAL`, and `MULTIMODAL_ANALYSIS` workflows.
+  - Generates realistic operational `ExecutionEvent` contracts into the stream.
+  - Implements Human-in-the-loop (HITL) approval states (`WAITING_FOR_APPROVAL`) and resumes execution via `controller.record_approval(...)` upon operator decision.
+
+- Added `aegis/ui/service.py`:
+  - `UIBackendService`: central backend coordinator for UI callbacks.
+  - Enforces `AuthService`, `SessionGuard`, `AuditGuard`, and `SystemGuard` before any state or data operation.
+  - Integrates session lifecycle via `AuthorizedSessionService`, network telemetry via `AuthorizedNetworkMonitor`, model health via `ModelRegistry`, and audit logs via `AuditService`.
+
+- Added `aegis/ui/views.py`:
+  - Component and layout builders for `LoginComponents`, `UserViewComponents`, and `AdminViewComponents`.
+  - USER view layout: Sidebar (AEGIS, New Session, session list, current user, logout) and Main area (task/chat area, file upload, task input, execution-event stream area, deliverable result area, HITL approval area).
+  - ADMIN view layout: Sidebar (Dashboard, Users, Sessions, Audit, Network, Model Health, logout) and Main area (reactive panes for system metrics, users table, cross-user sessions table, execution audit table, network monitoring telemetry table, and model health status table).
+
+- Added `aegis/ui/app.py`:
+  - `create_app(service)`: builds and wires Gradio Blocks with `session_state` management and role-based view transitions.
+
+- Updated `aegis/ui/__init__.py`:
+  - Re-exported `create_app`, `UIBackendService`, and `UITaskResult`.
+
+- Updated `aegis/sessions/repository.py`, `aegis/sessions/sqlite_store.py`, `aegis/sessions/service.py`, and `aegis/sessions/authorized_service.py`:
+  - Extended `list_sessions(user_id=None)` to support cross-user session listing for ADMIN callers holding `VIEW_ALL_SESSIONS`.
+
+- Added tests:
+  - `tests/test_ui_service.py` (15 tests): auth, sessions, task runner, HITL approval/rejection, admin dashboard, users, sessions, audit, network, model health, and RBAC denial for USER.
+  - `tests/test_gradio_app.py` (3 tests): Blocks initialization, component layout verification, and view rendering.
+  - `tests/test_imports.py`: added import tests for `aegis.audit` and `aegis.ui`.
+
+## Files changed
+
+- `aegis/audit/service.py` (new)
+- `aegis/audit/__init__.py`
+- `aegis/ui/runner.py` (new)
+- `aegis/ui/service.py` (new)
+- `aegis/ui/views.py` (new)
+- `aegis/ui/app.py` (new)
+- `aegis/ui/__init__.py` (new)
+- `aegis/sessions/repository.py`
+- `aegis/sessions/sqlite_store.py`
+- `aegis/sessions/service.py`
+- `aegis/sessions/authorized_service.py`
+- `tests/test_ui_service.py` (new)
+- `tests/test_gradio_app.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `pytest tests/test_ui_service.py -v` → **15 passed**
+- `pytest tests/test_gradio_app.py -v` → **3 passed**
+- `pytest tests/test_imports.py -v` → **16 passed**
+- `pytest tests/test_sessions.py -v` → **47 passed**
+- `pytest tests/test_auth.py -v` → **111 passed**
+- `pytest -q` → **650 passed** (full repository regression suite, 0 failures, 0 errors).
+
+## Current status
+
+Phase 6.X complete. The AEGIS Gradio application shell is implemented and verified. Role-based views (USER and ADMIN) are functional, backed by domain services with zero business logic in UI callbacks. Deterministic execution and HITL state machine operations work seamlessly.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Stop after this task as explicitly requested.
+
 # 2026-09-03 — Phase 6.X Network Monitoring Abstraction
 
 ## Objective

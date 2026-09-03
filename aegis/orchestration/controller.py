@@ -298,12 +298,12 @@ class ExecutionController:
         self.state.approval_status = ApprovalStatus.REJECTED
         self.state.final_status = FinalStatus.CANCELLED
         self._record_controller_observation(
-            "approval_rejected", "Human approval was rejected; task cancelled.", None
+            "approval_rejected", "Human approval was rejected; task rejected.", None
         )
         return self._emit(
             ExecutionEventType.APPROVAL_RECORDED,
             ExecutionEventStatus.COMPLETED,
-            "Human rejection recorded; task cancelled.",
+            "Human rejection recorded.",
             metadata=self._hitl_decision_metadata(reject_decision),
         )
 
