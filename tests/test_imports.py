@@ -176,3 +176,43 @@ def test_verify_result_capability_is_importable():
 def test_generate_excel_capability_is_importable():
     assert GenerateExcelCapability.__name__ == "GenerateExcelCapability"
     assert callable(generate_excel_deliverable)
+
+
+def test_auth_package_is_importable():
+    import aegis.auth
+    from aegis.auth import (
+        AuditGuard,
+        AuthService,
+        AuthenticationError,
+        AuthorizationError,
+        Permission,
+        PrototypeCredentialStore,
+        SessionGuard,
+        SystemGuard,
+        TokenStore,
+        UserIdentity,
+        UserRole,
+        has_permission,
+        require_permission,
+    )
+    assert UserRole.USER == "user"
+    assert UserRole.ADMIN == "admin"
+    assert AuthService.__name__ == "AuthService"
+    assert SessionGuard.__name__ == "SessionGuard"
+    assert AuditGuard.__name__ == "AuditGuard"
+    assert SystemGuard.__name__ == "SystemGuard"
+    assert issubclass(AuthenticationError, Exception)
+    assert issubclass(AuthorizationError, Exception)
+    assert callable(has_permission)
+    assert callable(require_permission)
+
+
+def test_authorized_session_service_is_importable():
+    from aegis.sessions import AuthorizedSessionService
+    assert AuthorizedSessionService.__name__ == "AuthorizedSessionService"
+
+
+def test_auth_config_is_importable():
+    from aegis.config import AuthConfig, AegisConfig
+    assert AuthConfig.__name__ == "AuthConfig"
+    assert "auth" in AegisConfig.model_fields

@@ -18,7 +18,223 @@ After each meaningful implementation task, update this file with:
 `DEV_LOG.md` contains evolving implementation state.
 
 ---
+# 2026-09-03 — Phase 6.X Prototype RBAC
+
+## Objective
+
+Implement lightweight prototype authentication and authorization with two roles (`USER`, `ADMIN`). No external IAM, no enterprise services — prototype credentials and in-memory token store only. Authorization enforced in backend service guards, never delegated to UI visibility.
+
+## What changed
+
+- Added `aegis/auth/` package (new):
+  - `aegis/auth/exceptions.py`: `AuthenticationError(Exception)` — raised on invalid/expired/revoked token; `AuthorizationError(Exception)` — raised on insufficient permission; carries `required_permission`, `actual_role`, `user_id` attributes for structured assertions.
+  - `aegis/auth/models.py`: `UserRole` (StrEnum: `user`, `admin`); `UserIdentity` (Pydantic, frozen: `user_id`, `username`, `role`, `display_name`); `AuthToken` (frozen: `token`, `user_id`, `username`, `role`, `issued_at`, `expires_at` — all UTC-aware); `LoginRequest`; `LoginResult` (frozen: `success`, `token`, `error`).
+  - `aegis/auth/credentials.py`: `PrototypeCredentialStore` — read-only lookup/verify against hardcoded prototype table (alice/bob → USER, admin → ADMIN). Uses `secrets.compare_digest` for constant-time comparison. Clearly marked PROTOTYPE ONLY.
+  - `aegis/auth/tokens.py`: `TokenStore` — thread-safe, in-memory opaque token store (UUID4 hex tokens, TTL, explicit revocation, `purge_expired`). Tokens are stateful but have no encoded claims.
+  - `aegis/auth/authorization.py`: `Permission` (StrEnum, 11 values); `_ROLE_PERMISSIONS` mapping (USER → 6, ADMIN → all 11 including USER set as subset); `get_permissions`, `has_permission`, `require_permission` (raises `AuthorizationError` with structured attributes).
+  - `aegis/auth/service.py`: `AuthService` facade — `login` (never raises; returns `LoginResult`), `logout` (idempotent revocation), `resolve_current_user` (returns `None` on invalid token), `require_user` (raises `AuthenticationError`), `require_role` (raises `AuthorizationError`; ADMIN satisfies USER requirement).
+  - `aegis/auth/guards.py`: `SessionGuard` (7 named check methods for session/task/event/HITL access), `AuditGuard` (`require_view_all_audit` — ADMIN only), `SystemGuard` (`require_system_status`, `require_network_monitor`, `require_model_health` — all ADMIN only). Each guard combines `AuthService.require_user` + `require_permission`.
+  - `aegis/auth/__init__.py`: full public re-exports.
+
+- Added `aegis/sessions/authorized_service.py`:
+  - `AuthorizedSessionService` — wraps `SessionService` and enforces RBAC permission checks before delegation. Existing `SessionService` isolation (cross-user → `NotFoundError`) is preserved unmodified; auth check runs on top.
+  - All 6 public methods accept a resolved `UserIdentity` (caller must go through `AuthService` first).
+  - `create_session` → `CREATE_OWN_SESSION`; `get_session`/`close_session` → `ACCESS_OWN_SESSION`; `list_sessions` dispatches to `ACCESS_OWN_SESSION` (USER) or `VIEW_ALL_SESSIONS` (ADMIN); `create_task` → `SUBMIT_TASK`; `get_task`/`update_task_status` → `ACCESS_OWN_SESSION`.
+
+- Updated `aegis/sessions/__init__.py`: added `AuthorizedSessionService` to exports.
+
+- Updated `aegis/config/schemas.py`:
+  - Added `AuthConfig` (Pydantic): `enabled: bool = True`, `token_ttl_seconds: int = Field(3600, ge=60, le=86400)`.
+  - Added `auth: AuthConfig = Field(default_factory=AuthConfig)` to `AegisConfig`.
+
+- Updated `aegis/config/__init__.py`: added `AuthConfig` to imports and `__all__`.
+
+- Added `tests/test_auth.py` (111 tests across 8 test classes):
+  - `TestUserRoleAndPermissions` (9): enum values, USER/ADMIN permission sets, `has_permission`, `get_permissions`, admin superset, `require_permission` raises with attributes.
+  - `TestCredentialStore` (10): lookup alice/admin, lookup unknown returns None, verify correct/wrong password, verify unknown user, all prototype users verifiable, identity is immutable.
+  - `TestTokenStore` (11): issue returns token, opaque string, validate valid, unknown returns None, revoke, revoke unknown is silent, expired returns None, each token unique, TTL defaults, custom TTL, purge_expired.
+  - `TestAuthService` (21): **successful login** (alice, admin, correct fields); **failed login** (wrong password, unknown user, never raises, generic error); logout revokes/idempotent/silent; resolve_current_user valid/invalid/after-logout; require_user valid/invalid/after-logout; require_role user/admin/admin-satisfies-user/user-denied-admin/invalid-token.
+  - `TestAuthorization` (22): all 6 USER permissions pass, all 5 ADMIN-only permissions denied for USER, all 5 ADMIN permissions pass, admin inherits user set.
+  - `TestGuards` (18): SessionGuard 8 checks, AuditGuard 3 checks, SystemGuard 6 checks — covering **USER authorization**, **ADMIN authorization**, and **audit access denial for USER**.
+  - `TestAuthorizedSessionService` (11): user creates/gets/lists/closes own session; **cross-user session access denied** (NotFoundError, no data leakage); list isolation; task create/get; permission check; admin can create session.
+  - `TestAuthExceptions` (8): AuthenticationError default/custom message/is-Exception; AuthorizationError has structured attributes/is-Exception/optional-attrs-None; require_permission error carries all; require_user raises typed AuthenticationError.
+  - `TestAuthConfig` (5): defaults, custom values, TTL minimum validation, AegisConfig includes auth, importable.
+
+- Updated `tests/test_imports.py`: added 3 new import-check tests (`test_auth_package_is_importable`, `test_authorized_session_service_is_importable`, `test_auth_config_is_importable`).
+
+## Files changed
+
+- `aegis/auth/__init__.py` (new)
+- `aegis/auth/exceptions.py` (new)
+- `aegis/auth/models.py` (new)
+- `aegis/auth/credentials.py` (new)
+- `aegis/auth/tokens.py` (new)
+- `aegis/auth/authorization.py` (new)
+- `aegis/auth/service.py` (new)
+- `aegis/auth/guards.py` (new)
+- `aegis/sessions/authorized_service.py` (new)
+- `aegis/sessions/__init__.py`
+- `aegis/config/schemas.py`
+- `aegis/config/__init__.py`
+- `tests/test_auth.py` (new)
+- `tests/test_imports.py`
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_auth.py -v -p no:cacheprovider --basetemp .pytest-tmp` → **111 passed**.
+- `python -m pytest tests/test_imports.py tests/test_sessions.py -v -p no:cacheprovider --basetemp .pytest-tmp` → **60 passed**.
+- `python -m pytest -q -p no:cacheprovider --basetemp .pytest-tmp` → **568 passed** (full regression, 0 failures, 0 errors).
+
+## Current status
+
+Complete. Prototype RBAC implemented and fully tested. Auth is enforced in backend service guards — not delegated to UI visibility. `AuthorizedSessionService` preserves all existing `SessionService` isolation invariants. All 6 required test scenarios pass: successful login, failed login, USER authorization, ADMIN authorization, cross-user session access denial, audit access denial for USER. Prototype credentials are clearly labelled; `secrets.compare_digest` prevents timing-based enumeration.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+As explicitly scoped: stop after this task.
+
+---
+# 2026-09-03 — Phase 6.X HITL Approval State Machine
+
+## Objective
+
+Implement a deterministic, formally governed HITL (Human-in-the-Loop) approval state machine owned exclusively by the `ExecutionController`. The state machine enforces the required states and transitions, records every decision as an immutable audit record, and prevents the UI from directly mutating execution state.
+
+## What changed
+
+- Added `aegis/orchestration/hitl.py`:
+  - `HITLApprovalState` (StrEnum): `draft`, `waiting_for_approval`, `approved`, `rejected`, `final`.
+  - `_VALID_TRANSITIONS` (module-level mapping): authoritative transition table enforcing exactly four legal transitions:
+    - `DRAFT → WAITING_FOR_APPROVAL` (submit)
+    - `WAITING_FOR_APPROVAL → APPROVED` (approve)
+    - `WAITING_FOR_APPROVAL → REJECTED` (reject)
+    - `APPROVED → FINAL` (finalize)
+  - `HITLApprovalDecision` (Pydantic, frozen): immutable per-transition audit record containing `decision_id`, `user_id`, `task_id`, `session_id`, `timestamp` (UTC-aware), `previous_state`, `new_state`, `decision`. JSON-serializable via `model_dump(mode="json")`.
+  - `InvalidHITLTransitionError(ValueError)`: raised on any illegal transition; carries `from_state` and `to_state` attributes; includes human-readable message with allowed targets.
+  - `HITLApprovalStateMachine`: deterministic state machine with `submit()`, `approve()`, `reject()`, `finalize()` transition methods. Internal `_transition()` guard validates against `_VALID_TRANSITIONS` before executing. State is unchanged and history is unmodified on failed transitions. `history` property returns a tuple copy of `HITLApprovalDecision` records, preventing external mutation. `user_id` resolves per-call argument first, then falls back to the constructor-supplied default.
+
+- Updated `aegis/orchestration/controller.py`:
+  - Imports `HITLApprovalDecision`, `HITLApprovalState`, `HITLApprovalStateMachine`, `InvalidHITLTransitionError` from `.hitl`.
+  - `__init__`: initialises `self._hitl: HITLApprovalStateMachine | None` — set for approval-required workflows, `None` otherwise.
+  - New read-only properties: `hitl_state` (current `HITLApprovalState | None`) and `hitl_history` (tuple of `HITLApprovalDecision`).
+  - `_handle_success`: after `verify_result` succeeds for an approval-required workflow, calls `_hitl.submit()` advancing the state machine to `WAITING_FOR_APPROVAL`; after `finish` succeeds and `_hitl.state == APPROVED`, calls `_hitl.finalize()` advancing to `FINAL` and includes `_hitl_decision_metadata()` in the `TASK_COMPLETED` event.
+  - `record_approval(approved, user_id=None)`: augmented signature accepts optional `user_id`. Guards: workflow requires approval, task is non-terminal, `current_step == "finish"` with `verification_status == PASSED`, and `_hitl.state == WAITING_FOR_APPROVAL`. Routes to `_hitl.approve(user_id)` or `_hitl.reject(user_id)` and includes `_hitl_decision_metadata()` in the emitted `APPROVAL_RECORDED` event.
+  - Static helper `_hitl_decision_metadata(decision)`: returns a metadata-safe `dict` with `hitl_decision_id`, `hitl_previous_state`, `hitl_new_state`, `hitl_decision`, `hitl_user_id`, `hitl_timestamp` — all JSON-primitive types safe for `ExecutionEvent.metadata`.
+
+- Updated `aegis/orchestration/__init__.py`:
+  - Exports `HITLApprovalDecision`, `HITLApprovalState`, `HITLApprovalStateMachine`, `InvalidHITLTransitionError` from the package root.
+
+- Added `tests/test_hitl.py` (77 tests across 7 test classes):
+  - `TestHITLApprovalStateEnum` (5): all required states exist, StrEnum membership, string repr, count.
+  - `TestHITLApprovalDecision` (8): required fields, user_id optional/stored, UTC timestamp, naive timestamp raises, frozen immutability, JSON round-trip, unique decision IDs.
+  - `TestHITLStateMachineInitial` (3): initial state `DRAFT`, empty history, task/session IDs stored.
+  - `TestHITLStateMachineValidTransitions` (9): all 4 valid transitions succeed with correct decision labels, user_id resolution (per-call → default), task/session ID propagation, UTC timestamps.
+  - `TestHITLStateMachineInvalidTransitions` (16): every illegal transition raises `InvalidHITLTransitionError`; error is a `ValueError` subclass; error message contains state names; state and history unchanged after failed transition.
+  - `TestHITLStateMachineHistory` (6): accumulation order, tuple return, copy semantics (live list not exposed), rejection-path history, unique decision IDs, frozen records.
+  - `TestControllerHITLIntegration` (30): `hitl_state` is `None` for non-approval workflow; starts at `DRAFT`; advances to `WAITING_FOR_APPROVAL` after verify; full approval path → `APPROVED → FINAL`; rejection path → `REJECTED`; history length/decisions on both paths; guard rejections (non-approval workflow, terminal task, pre-verify); `APPROVAL_RECORDED` event kind; event metadata fields (`hitl_decision_id`, `hitl_previous_state`, `hitl_new_state`, `hitl_decision`, `hitl_user_id`, `hitl_timestamp`); `finish` event metadata contains finalize decision; user_id propagation; task/session ID consistency in decision records; `FinalStatus` and `ApprovalStatus` correctness; `HITL_REQUIRED` event emitted.
+
+## Files changed
+
+- `aegis/orchestration/hitl.py` (new)
+- `aegis/orchestration/controller.py`
+- `aegis/orchestration/__init__.py`
+- `tests/test_hitl.py` (new)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_hitl.py tests/test_controller.py -v -p no:cacheprovider --basetemp .pytest-tmp` → **82 passed**.
+- `python -m pytest -q -p no:cacheprovider --basetemp .pytest-tmp` → **454 passed** (full regression, 0 failures, 0 errors).
+- `python -m compileall aegis` — no separate step; full regression imports all aegis modules, zero import errors.
+
+## Current status
+
+Complete. The HITL approval state machine is implemented, formally governed, and fully tested. The `ExecutionController` is the sole owner of the state machine; the UI cannot directly mutate approval state. All decision records include the required `user_id`, `task_id`, `session_id`, `timestamp`, `previous_state`, `new_state`, and `decision` fields. All four valid transitions are exercised. All illegal transitions raise `InvalidHITLTransitionError` and leave the state machine unchanged.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+As explicitly scoped: stop after this task.
+
+---
+# 2026-09-03 — Phase 6.X Session and Task State
+
+## Objective
+
+Implement provider-independent session and task management with SQLite persistence in the `aegis/sessions/` package. Sessions and tasks are independent from the existing `TaskState`/`ExecutionController`/`ModelProvider`; those are not modified. No UI or authentication is added.
+
+## What changed
+
+- Added `aegis/sessions/models.py`:
+  - `SessionStatus` (StrEnum): `active`, `archived`, `closed`.
+  - `TaskStatus` (StrEnum): `pending`, `running`, `completed`, `failed`, `cancelled`.
+  - `SessionRecord` (Pydantic, frozen): `session_id`, `user_id`, `created_at`, `updated_at`, `status`. All timestamps UTC-aware, validated by field validator.
+  - `TaskRecord` (Pydantic, frozen): `task_id`, `session_id`, `user_id`, `created_at`, `status`, `workflow_id`. `workflow_id` mirrors `TaskState.selected_skill`.
+- Added `aegis/sessions/repository.py`:
+  - `NotFoundError` — raised for unknown session/task UUIDs.
+  - `SessionIsolationError` — raised when a task is accessed via the wrong session.
+  - `SessionRepository` (ABC): `create_session`, `get_session`, `list_sessions`, `update_session_status`.
+  - `TaskRepository` (ABC): `create_task`, `get_task`, `update_task_status`, `get_tasks_for_session`.
+- Added `aegis/sessions/sqlite_store.py`:
+  - `SqliteSessionRepository` and `SqliteTaskRepository` — concrete implementations using Python stdlib `sqlite3`, WAL journal mode, shared connection, ISO-8601 UTC timestamp serialisation, schema creation idempotent via `CREATE TABLE IF NOT EXISTS`.
+  - `SqliteStoreFactory.create(db_path)` — creates matched session/task repository pair sharing one connection; accepts `":memory:"` for tests.
+- Added `aegis/sessions/service.py`:
+  - `SessionService` — facade coordinating session and task repos with user-isolation invariants:
+    - `create_session`, `get_session` (ownership check), `list_sessions`, `close_session` (ownership check).
+    - `create_task` (verifies session ownership), `get_task` (verifies session membership), `update_task_status` (verifies session membership).
+    - Cross-user `get_session` raises `NotFoundError` (no data leakage).
+    - Cross-session `get_task` raises `SessionIsolationError`.
+- Updated `aegis/sessions/__init__.py`:
+  - Replaced stub comment with full package re-exports for all public names.
+- Added `tests/test_sessions.py` (47 tests across 7 test classes):
+  - `TestSessionCreation` (8): fields, UUID, status, UTC timestamps, explicit ID, retrieval, immutability, created_at == updated_at initially.
+  - `TestTaskCreation` (8): fields, pending status, optional/stored workflow_id, explicit task_id, retrieval, UTC timestamps, multiple tasks per session.
+  - `TestUserSessionAssociation` (4): user isolation in listing, empty list for unknown user, ordering, task carries user_id.
+  - `TestSessionIsolation` (6): wrong-user get raises NotFoundError, list isolation, wrong-session get_task raises SessionIsolationError, cross-user task visibility via service, close-session wrong user, create_task for another user's session.
+  - `TestInvalidAccess` (6): unknown UUID for get_session/get_task/update_session_status/update_task_status at repo layer and service layer.
+  - `TestSessionService` (7): end-to-end create/retrieve, close, updated_at, task CRUD, status update, isolation check, list count.
+  - `TestMultipleSessionsMultipleUsers` (5): user isolation at scale, cross-user task isolation, many tasks in one session, globally unique session/task IDs.
+  - `TestSqliteStoreFactory` (3): factory returns repos, schema idempotent across two opens (using `tmp_path` to handle Windows WAL lock), shared connection consistency.
+
+## Files changed
+
+- `aegis/sessions/models.py` (new)
+- `aegis/sessions/repository.py` (new)
+- `aegis/sessions/sqlite_store.py` (new)
+- `aegis/sessions/service.py` (new)
+- `aegis/sessions/__init__.py` (stub replaced with full exports)
+- `tests/test_sessions.py` (new)
+- `Docs/DEV_LOG.md`
+
+## Tests / checks
+
+- `python -m pytest tests/test_sessions.py -v -p no:cacheprovider --basetemp .pytest-tmp` → 47 passed.
+- `python -m pytest -q -p no:cacheprovider --basetemp .pytest-tmp` → **377 passed** (full regression, 0 failures, 0 errors).
+- `python -m compileall aegis` → not run as separate step (full regression imports all aegis modules implicitly; 0 import errors).
+
+## Current status
+
+Complete. Provider-independent session and task management is implemented and fully tested. SQLite persistence uses stdlib only; WAL mode enabled for file-based databases. All user-isolation invariants are enforced at both the repository and service layers.
+
+## Blockers
+
+None.
+
+## Next concrete task
+
+Implement a concrete audit persistence adapter (store `ExecutionEvent` records in the same SQLite database) or begin Phase 9 UI integration (Gradio session sidebar, task context lifecycle), as explicitly scoped.
+
+---
 # 2026-09-03 — Execution Event Contract
+
 
 ## Objective
 

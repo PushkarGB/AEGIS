@@ -273,6 +273,19 @@ class RuntimeUISettings(BaseModel):
         return self
 
 
+class AuthConfig(BaseModel):
+    """Prototype authentication configuration.
+
+    Controls the lightweight RBAC layer.  This is a prototype configuration
+    only — no enterprise IAM, no external authentication services.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+
+
 class RuntimeSettings(BaseModel):
     """Environment and runtime configuration for the prototype shell."""
 
@@ -305,3 +318,4 @@ class AegisConfig(BaseModel):
     models: ModelRegistryConfig
     capabilities: CapabilityRegistryConfig
     runtime: RuntimeSettings
+    auth: AuthConfig = Field(default_factory=AuthConfig)
