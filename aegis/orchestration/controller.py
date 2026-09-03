@@ -22,6 +22,12 @@ from aegis.schemas import (
     VerificationStatus,
 )
 
+from .hitl import (
+    HITLApprovalDecision,
+    HITLApprovalState,
+    HITLApprovalStateMachine,
+    InvalidHITLTransitionError,
+)
 from .workflows import WorkflowDefinition, WorkflowName, get_workflow
 
 
@@ -79,6 +85,18 @@ class ExecutionController:
             self.state.current_step = self.workflow.start_state
         if self.workflow.requires_approval and self.state.approval_status == ApprovalStatus.NOT_REQUIRED:
             self.state.approval_status = ApprovalStatus.PENDING
+
+        # Initialise the HITL state machine for workflows that require it.
+        self._hitl: HITLApprovalStateMachine | None = (
+            HITLApprovalStateMachine(
+                task_id=self.state.task_id,
+                session_id=self.state.session_id,
+                user_id=self.state.user_id,
+            )
+            if self.workflow.requires_approval
+            else None
+        )
+
         self._emit(
             ExecutionEventType.TASK_STARTED,
             ExecutionEventStatus.STARTED,
@@ -95,6 +113,18 @@ class ExecutionController:
         """Expose the ordered, high-level event stream for this task."""
 
         return self._event_publisher.events
+
+    @property
+    def hitl_state(self) -> HITLApprovalState | None:
+        """Current HITL approval state, or None for workflows that do not require it."""
+
+        return self._hitl.state if self._hitl is not None else None
+
+    @property
+    def hitl_history(self) -> tuple[HITLApprovalDecision, ...]:
+        """Ordered HITL decision history (empty for non-approval workflows)."""
+
+        return self._hitl.history if self._hitl is not None else ()
 
     def observation_for_agent(self) -> Observation:
         """Return the latest capability observation for Agent reasoning.
@@ -212,10 +242,23 @@ class ExecutionController:
             return self._handle_success(decision.action, result)
         return self._handle_failure(decision.action, result)
 
-    def record_approval(self, approved: bool) -> ExecutionEvent:
-        """Record an external human approval decision after successful verification."""
+    def record_approval(self, approved: bool, user_id: str | None = None) -> ExecutionEvent:
+        """Record an external human approval decision after successful verification.
 
-        if not self.workflow.requires_approval:
+        The decision is routed through the HITL state machine owned by this
+        Controller.  The UI must not mutate approval state directly.
+
+        Parameters
+        ----------
+        approved:
+            ``True`` for approval (WAITING_FOR_APPROVAL -> APPROVED),
+            ``False`` for rejection (WAITING_FOR_APPROVAL -> REJECTED).
+        user_id:
+            Identity of the human operator recording the decision.  Falls back
+            to the ``TaskState.user_id`` supplied at construction.
+        """
+
+        if not self.workflow.requires_approval or self._hitl is None:
             return self._emit(
                 ExecutionEventType.CAPABILITY_REJECTED,
                 ExecutionEventStatus.REJECTED,
@@ -233,15 +276,25 @@ class ExecutionController:
                 ExecutionEventStatus.REJECTED,
                 "Approval is allowed only after verification passes.",
             )
+        # Guard: state machine must be in WAITING_FOR_APPROVAL.
+        if self._hitl.state != HITLApprovalState.WAITING_FOR_APPROVAL:
+            return self._emit(
+                ExecutionEventType.CAPABILITY_REJECTED,
+                ExecutionEventStatus.REJECTED,
+                f"HITL state machine is not waiting for approval (current: {self._hitl.state!r}).",
+            )
 
         if approved:
+            approve_decision = self._hitl.approve(user_id)
             self.state.approval_status = ApprovalStatus.APPROVED
             return self._emit(
                 ExecutionEventType.APPROVAL_RECORDED,
                 ExecutionEventStatus.COMPLETED,
                 "Human approval recorded; workflow may finish.",
+                metadata=self._hitl_decision_metadata(approve_decision),
             )
 
+        reject_decision = self._hitl.reject(user_id)
         self.state.approval_status = ApprovalStatus.REJECTED
         self.state.final_status = FinalStatus.CANCELLED
         self._record_controller_observation(
@@ -251,6 +304,7 @@ class ExecutionController:
             ExecutionEventType.APPROVAL_RECORDED,
             ExecutionEventStatus.COMPLETED,
             "Human rejection recorded; task cancelled.",
+            metadata=self._hitl_decision_metadata(reject_decision),
         )
 
     def _rejection_reason(self, decision: AgentDecision) -> str | None:
@@ -314,7 +368,9 @@ class ExecutionController:
             capability_id=action,
             request_id=result.request_id,
         )
-        if action == "verify_result" and self.workflow.requires_approval:
+        if action == "verify_result" and self.workflow.requires_approval and self._hitl is not None:
+            # Advance HITL state machine: DRAFT -> WAITING_FOR_APPROVAL.
+            self._hitl.submit()
             self._emit(
                 ExecutionEventType.HITL_REQUIRED,
                 ExecutionEventStatus.REQUIRES_ACTION,
@@ -322,6 +378,17 @@ class ExecutionController:
             )
         if action == "finish":
             self.state.final_status = FinalStatus.COMPLETED
+            # Advance HITL state machine to FINAL when the task finishes after approval.
+            if self._hitl is not None and self._hitl.state == HITLApprovalState.APPROVED:
+                finalize_decision = self._hitl.finalize()
+                return self._emit(
+                    ExecutionEventType.TASK_COMPLETED,
+                    ExecutionEventStatus.COMPLETED,
+                    "Workflow completed.",
+                    capability_id=action,
+                    request_id=result.request_id,
+                    metadata=self._hitl_decision_metadata(finalize_decision),
+                )
             return self._emit(
                 ExecutionEventType.TASK_COMPLETED,
                 ExecutionEventStatus.COMPLETED,
@@ -388,6 +455,18 @@ class ExecutionController:
                 request_id=request_id,
             )
         )
+
+    @staticmethod
+    def _hitl_decision_metadata(decision: HITLApprovalDecision) -> dict[str, object]:
+        """Return a metadata-safe dict from a HITLApprovalDecision."""
+        return {
+            "hitl_decision_id": str(decision.decision_id),
+            "hitl_previous_state": decision.previous_state,
+            "hitl_new_state": decision.new_state,
+            "hitl_decision": decision.decision,
+            "hitl_user_id": decision.user_id,
+            "hitl_timestamp": decision.timestamp.isoformat(),
+        }
 
     def _emit_capability_completion(
         self,

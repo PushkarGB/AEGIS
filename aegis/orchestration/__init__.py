@@ -9,6 +9,12 @@ from aegis.events import (
 )
 
 from .controller import ExecutionController, ExecutionEventKind
+from .hitl import (
+    HITLApprovalDecision,
+    HITLApprovalState,
+    HITLApprovalStateMachine,
+    InvalidHITLTransitionError,
+)
 from .workflows import WorkflowDefinition, WorkflowName, get_workflow
 
 __all__ = [
@@ -19,6 +25,10 @@ __all__ = [
     "ExecutionEventPublisher",
     "ExecutionEventStatus",
     "ExecutionEventType",
+    "HITLApprovalDecision",
+    "HITLApprovalState",
+    "HITLApprovalStateMachine",
+    "InvalidHITLTransitionError",
     "WorkflowDefinition",
     "WorkflowName",
     "get_workflow",
