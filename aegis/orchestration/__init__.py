@@ -16,6 +16,7 @@ from .hitl import (
     InvalidHITLTransitionError,
 )
 from .workflows import WorkflowDefinition, WorkflowName, get_workflow
+from .runtime_runner import RuntimeTaskRunner
 
 __all__ = [
     "ExecutionController",
@@ -29,6 +30,7 @@ __all__ = [
     "HITLApprovalState",
     "HITLApprovalStateMachine",
     "InvalidHITLTransitionError",
+    "RuntimeTaskRunner",
     "WorkflowDefinition",
     "WorkflowName",
     "get_workflow",

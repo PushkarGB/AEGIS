@@ -10,7 +10,15 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any
+
+from aegis.events import (
+    ExecutionEvent,
+    ExecutionEventPublisher,
+    ExecutionEventStatus,
+    ExecutionEventType,
+)
 
 from aegis.capabilities.base import (
     Capability,
@@ -34,7 +42,9 @@ from aegis.schemas import (
 
 _DEFAULT_OUTPUT_CONSTRAINTS: list[str] = [
     "Read data using openpyxl from the specified file path.",
-    "Print all results to stdout as structured, human-readable text.",
+    "Print results to stdout as a single JSON array of aggregated records (one per entity/group, e.g. equipment ID).",
+    "Each record must be a JSON object containing the entity identifier, computed numeric metrics, and any threshold/compliance boolean flags.",
+    "Do not print any text or commentary other than the JSON output.",
     "Do not write any files.",
     "Do not make external network requests.",
     "Do not import packages beyond openpyxl and the Python standard library.",
@@ -116,6 +126,18 @@ def _resolve_file_path(inputs: dict[str, Any]) -> str | None:
     return None
 
 
+def _sandbox_path_for(host_path: str) -> str:
+    """Return the portable sandbox path for a host file path.
+
+    DockerSandboxRunner copies the data file into /workspace/<basename>.
+    The generated code must reference this portable path, not the host
+    Windows path, so it works inside the Linux container.
+    """
+    from pathlib import PurePath
+    basename = PurePath(host_path).name
+    return f"/workspace/{basename}"
+
+
 def _resolve_correction_context(inputs: dict[str, Any]) -> str | None:
     """Resolve previous error or correction context for retries."""
     for key in ("correction_context", "previous_error", "error_context"):
@@ -132,6 +154,9 @@ def _build_user_prompt(inputs: dict[str, Any]) -> str:
     - computation objective;
     - relevant spreadsheet structure/data description;
     - required output constraints.
+
+    The file path is normalized to the sandbox-portable path (/workspace/<name>)
+    so the generated code works inside the Docker container.
     """
     parts: list[str] = []
 
@@ -145,10 +170,23 @@ def _build_user_prompt(inputs: dict[str, Any]) -> str:
 
     file_path = _resolve_file_path(inputs)
     if file_path:
-        parts.append(f"\nSpreadsheet File Path: {file_path}")
+        # Always pass the sandbox-portable path so Docker container can find it
+        sandbox_path = _sandbox_path_for(file_path)
+        parts.append(f"\nSpreadsheet File Path: {sandbox_path}")
+        parts.append(
+            f"\nIMPORTANT: The file is available at exactly this path inside the execution "
+            f"sandbox: `{sandbox_path}`. Use this exact path in your code, not the original host path."
+        )
 
     constraints = _resolve_constraints(inputs)
     if constraints:
+        # Strip any constraint that embeds a raw host file path and replace with sandbox path
+        if file_path:
+            sandbox_path = _sandbox_path_for(file_path)
+            constraints = [
+                c.replace(file_path, sandbox_path) if file_path in c else c
+                for c in constraints
+            ]
         constraint_lines = "\n".join(f"- {c}" for c in constraints)
         parts.append(f"\nRequired Output Constraints:\n{constraint_lines}")
 
@@ -159,7 +197,7 @@ def _build_user_prompt(inputs: dict[str, Any]) -> str:
     parts.append(
         "\nGenerate valid, executable Python code that fulfills the computation objective "
         "using the spreadsheet structure and adhering strictly to all output constraints. "
-        "Print all results to stdout."
+        "Print all results to stdout as JSON."
     )
 
     return "\n".join(parts)
@@ -203,12 +241,10 @@ def generate_code(
 ) -> str:
     """Generate executable Python code for computation via ModelRouter and ModelProvider.
 
-    The Coding Model receives:
-    - computation objective;
-    - relevant spreadsheet structure/data description;
-    - required output constraints.
-
-    Returns executable Python code. Does NOT execute the generated code.
+    Note:
+        This is a legacy direct-call helper maintained for backwards compatibility.
+        In governed runtime workflows, use GenerateCodeCapability instead, which
+        properly emits audit events and tracks task execution state.
     """
     if not computation_objective or not computation_objective.strip():
         raise ValueError("computation_objective must be a non-empty string.")
@@ -270,8 +306,10 @@ class GenerateCodeCapability(Capability):
         providers: dict[str, ModelProvider] | ModelProvider | None = None,
         *,
         provider: ModelProvider | None = None,
+        event_publisher: ExecutionEventPublisher | None = None,
     ) -> None:
         self._router = router
+        self._event_publisher = event_publisher
         if isinstance(providers, ModelProvider):
             self._providers = {providers.__class__.__name__: providers}
             self._default_provider: ModelProvider | None = providers
@@ -404,10 +442,59 @@ class GenerateCodeCapability(Capability):
         try:
             gen_result = provider.generate(gen_request)
         except Exception as exc:
+            if self._event_publisher is not None:
+                self._event_publisher.publish(
+                    ExecutionEvent(
+                        session_id=request.task_id or uuid.uuid4(),
+                        task_id=request.task_id or uuid.uuid4(),
+                        user_id=None,
+                        event_type=ExecutionEventType.MODEL_INVOKED,
+                        component="generate_code",
+                        status=ExecutionEventStatus.FAILED,
+                        summary=f"Model invocation failed for {routing.model_id}.",
+                        capability_id="generate_code",
+                        model_id=routing.model_id,
+                        model_provider_id=routing.provider_id,
+                        request_id=request.request_id,
+                        metadata={
+                            "prompt": gen_request.prompt,
+                            "system_prompt": gen_request.system_prompt,
+                            "model_prompt": gen_request.prompt,
+                            "role": "coding",
+                            "task_type": "code_generation",
+                            "error": str(exc),
+                        },
+                    )
+                )
             return CapabilityResult(
                 request_id=request.request_id,
                 status=CapabilityResultStatus.FAILED,
                 error=f"Code generation model failed: {exc}",
+            )
+
+        if self._event_publisher is not None:
+            self._event_publisher.publish(
+                ExecutionEvent(
+                    session_id=request.task_id or uuid.uuid4(),
+                    task_id=request.task_id or uuid.uuid4(),
+                    user_id=None,
+                    event_type=ExecutionEventType.MODEL_INVOKED,
+                    component="generate_code",
+                    status=ExecutionEventStatus.COMPLETED,
+                    summary=f"Model invocation completed for {routing.model_id}.",
+                    capability_id="generate_code",
+                    model_id=routing.model_id,
+                    model_provider_id=routing.provider_id,
+                    request_id=request.request_id,
+                    metadata={
+                        "prompt": gen_request.prompt,
+                        "system_prompt": gen_request.system_prompt,
+                        "model_prompt": gen_request.prompt,
+                        "model_raw_response": gen_result.text,
+                        "role": "coding",
+                        "task_type": "code_generation",
+                    },
+                )
             )
 
         code = _extract_code(gen_result.text)
@@ -426,6 +513,8 @@ class GenerateCodeCapability(Capability):
                 "model_id": routing.model_id,
                 "provider_id": routing.provider_id,
                 "code_length": len(code),
+                "model_prompt": gen_request.prompt,
+                "model_raw_response": gen_result.text,
             },
             request_id=request.request_id,
         )

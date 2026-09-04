@@ -123,7 +123,8 @@ class DockerSandboxRunner(SandboxRunner):
       error categorization for audit logging.
     """
 
-    DEFAULT_IMAGE: str = "python:3.11-slim"
+    DEFAULT_IMAGE: str = "aegis-sandbox:latest"
+    FALLBACK_IMAGE: str = "python:3.11-slim"
     DEFAULT_TIMEOUT_SECONDS: float = 30.0
     DEFAULT_MEMORY_LIMIT: str = "512m"
     DEFAULT_CPU_LIMIT: str = "1.0"

@@ -130,9 +130,9 @@ def _stack(
     router = ModelRouter(ModelRegistry(config.models))
     agent_provider = MockModelProvider(response_factory=agent_factory)
     coding_provider = MockModelProvider(response_factory=lambda _req: code_response)
-    agent = RouterAgentRuntime(config.agent, router, {"local_stub": agent_provider})
+    agent = RouterAgentRuntime(config.agent, router, {"local_ollama": agent_provider})
     generate_cap = GenerateCodeCapability(
-        router=router, providers={"local_stub": coding_provider}
+        router=router, providers={"local_ollama": coding_provider}
     )
     run_cap = RunCodeCapability(sandbox=sandbox)
     broker = RegistryCapabilityBroker(_registry(generate_cap, run_cap))

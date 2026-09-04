@@ -34,6 +34,7 @@ class Permission(StrEnum):
     UPLOAD_FILE = "upload_file"
     VIEW_OWN_EVENTS = "view_own_events"
     INTERACT_HITL = "interact_hitl"
+    DOWNLOAD_ARTIFACT = "download_artifact"
 
     # ADMIN-only permissions
     VIEW_ALL_SESSIONS = "view_all_sessions"
@@ -55,6 +56,7 @@ _USER_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.UPLOAD_FILE,
         Permission.VIEW_OWN_EVENTS,
         Permission.INTERACT_HITL,
+        Permission.DOWNLOAD_ARTIFACT,
     }
 )
 

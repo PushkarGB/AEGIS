@@ -13,6 +13,7 @@ Responsibilities:
 
 from __future__ import annotations
 
+from pathlib import PurePath
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -75,7 +76,9 @@ class ExecutionOutcome(BaseModel):
 
 _SAFETY_CONSTRAINTS = [
     "Read data from the specified file path using openpyxl.",
-    "Print all results to stdout as structured, human-readable text.",
+    "Print results to stdout as a single JSON array of aggregated records (one per entity/group, e.g. equipment ID).",
+    "Each record must be a JSON object containing the entity identifier, computed numeric metrics, and any threshold/compliance boolean flags.",
+    "Do not print any text or commentary other than the JSON output.",
     "Do not write any files.",
     "Do not make network requests.",
     "Do not import packages beyond openpyxl and the Python standard library.",
@@ -192,8 +195,8 @@ def parse_execution_observation(result: CapabilityResult) -> ExecutionOutcome:
         )
 
     error_summary = result.error or "Code execution failed."
-    if stderr:
-        error_summary = f"{error_summary} stderr: {stderr}"
+    if stderr and stderr.strip() not in error_summary:
+        error_summary = f"{error_summary.strip()}\nstderr:\n{stderr.strip()}"
 
     return ExecutionOutcome(
         succeeded=False,

@@ -7,7 +7,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from aegis.events import ExecutionEventContext
-from aegis.orchestration import WorkflowName
+from aegis.orchestration.workflows import WorkflowName
 from aegis.schemas import AgentDecision, CapabilityResultStatus, Observation, TaskState
 
 CAPABILITY_PATTERN = r"^[a-z][a-z0-9_]*$"
@@ -84,6 +84,9 @@ class AttachmentDescriptor(AgentSchema):
     name: str = Field(min_length=1)
     media_type: str | None = Field(default=None, min_length=1)
     description: str | None = Field(default=None, min_length=1)
+    document_type: str | None = Field(default=None, min_length=1)
+    has_extractable_text: bool | None = None
+    page_count: int | None = Field(default=None, ge=0)
 
 
 class IntentAnalysisRequest(AgentSchema):

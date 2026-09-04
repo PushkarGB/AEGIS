@@ -398,9 +398,9 @@ def test_registry_from_repository_defaults():
     config = load_config()
     registry = ModelRegistry(config.models)
 
-    assert registry.get_model("agent_model_placeholder") is not None
-    assert registry.get_model("coding_model_placeholder") is not None
-    assert registry.get_model("vision_model_placeholder") is not None
+    assert registry.get_model("agent_model") is not None
+    assert registry.get_model("coding_model") is not None
+    assert registry.get_model("vision_model") is not None
     assert registry.get_default_model_for_role("agent") is not None
     assert registry.get_default_model_for_role("coding") is not None
     assert registry.get_default_model_for_role("vision") is not None

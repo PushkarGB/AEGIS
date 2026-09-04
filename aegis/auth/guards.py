@@ -84,6 +84,12 @@ class SessionGuard:
         require_permission(user, Permission.INTERACT_HITL)
         return user
 
+    def require_download_artifact(self, token_str: str) -> UserIdentity:
+        """Resolve caller and assert ``DOWNLOAD_ARTIFACT`` permission."""
+        user = self._auth.require_user(token_str)
+        require_permission(user, Permission.DOWNLOAD_ARTIFACT)
+        return user
+
 
 class AuditGuard:
     """Restricts all-audit record access to ADMIN callers.

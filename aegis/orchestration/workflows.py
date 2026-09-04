@@ -97,7 +97,7 @@ SCANNED_DOCUMENT_APPROVAL_WORKFLOW = WorkflowDefinition(
         "finish": frozenset({"finish"}),
     },
     success_states={
-        ("extract", "extract_document"): "ocr",
+        ("extract", "extract_document"): "knowledge_or_draft",
         ("ocr", "ocr_document"): "knowledge_or_draft",
         ("knowledge_or_draft", "search_knowledge"): "draft",
         ("knowledge_or_draft", "draft_approval_note"): "deliver",

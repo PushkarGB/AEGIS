@@ -24,12 +24,17 @@ from .run_code import (
     SandboxRunner,
     run_code,
 )
+from .finish import FinishCapability
+from .extract_document import ExtractDocumentCapability, extract_document_text
+from .draft_approval_note import DraftApprovalNoteCapability
+from .generate_word import GenerateWordCapability, create_approval_note_docx
 from .generate_excel import GenerateExcelCapability, generate_excel_deliverable
 from .verify_result import (
     VerificationCheck,
     VerificationOutcome,
     VerifyResultCapability,
     verify_computation_result,
+    verify_document_drafting_result,
 )
 
 __all__ = [
@@ -41,9 +46,15 @@ __all__ = [
     "ColumnInfo",
     "DisabledCapabilityError",
     "DockerSandboxRunner",
+    "DraftApprovalNoteCapability",
     "DuplicateCapabilityError",
+    "ExtractDocumentCapability",
+    "FinishCapability",
     "GenerateCodeCapability",
     "GenerateExcelCapability",
+    "GenerateWordCapability",
+    "create_approval_note_docx",
+    "extract_document_text",
     "generate_code",
     "generate_excel_deliverable",
     "InspectSpreadsheetCapability",
@@ -61,4 +72,5 @@ __all__ = [
     "inspect_spreadsheet",
     "run_code",
     "verify_computation_result",
+    "verify_document_drafting_result",
 ]

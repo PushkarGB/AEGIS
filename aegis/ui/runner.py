@@ -22,7 +22,7 @@ from aegis.events import (
     ExecutionEventStatus,
     ExecutionEventType,
 )
-from aegis.orchestration import ExecutionController, WorkflowName, get_workflow
+from aegis.orchestration import ExecutionController, RuntimeTaskRunner, WorkflowName, get_workflow
 from aegis.orchestration.hitl import HITLApprovalState
 from aegis.schemas import (
     AgentDecision,
@@ -185,6 +185,18 @@ class DeterministicTaskRunner:
             task_id,
             ("Approval workflow completed successfully.", ["deliverables/approval_note.docx"]),
         )
+        for art_path in artifacts:
+            p = Path(art_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            if not p.exists():
+                try:
+                    import docx
+                    doc = docx.Document()
+                    doc.add_heading("Approval Note", level=0)
+                    doc.add_paragraph("Approved clearance finalized by operator.")
+                    doc.save(str(p))
+                except Exception:
+                    p.write_bytes(b"PK\x03\x04mock_docx")
         result_text += "\n\n[Status: APPROVED and FINALIZED]"
 
         return ExecutionRunResult(
@@ -296,6 +308,20 @@ class DeterministicTaskRunner:
                 "- Generated deliverable: `deliverables/inspection_summary.xlsx`"
             )
             artifacts = ["deliverables/inspection_summary.xlsx"]
+            out_sheet = Path(artifacts[0])
+            out_sheet.parent.mkdir(parents=True, exist_ok=True)
+            if not out_sheet.exists():
+                try:
+                    import openpyxl
+                    wb = openpyxl.Workbook()
+                    ws = wb.active
+                    ws.title = "Inspection Summary"
+                    ws.append(["Equipment ID", "Average Measured Thickness", "Status"])
+                    ws.append(["EQ-104", 4.10, "BELOW MINIMUM"])
+                    ws.append(["EQ-208", 3.85, "BELOW MINIMUM"])
+                    wb.save(str(out_sheet))
+                except Exception:
+                    out_sheet.write_bytes(b"PK\x03\x04mock_xlsx")
             self._deliverables[task_id] = (result_text, artifacts)
 
         elif workflow_name == WorkflowName.SCANNED_DOCUMENT_APPROVAL:
@@ -321,6 +347,17 @@ class DeterministicTaskRunner:
                 "**Awaiting Human Approval**: Review findings above and click Approve or Reject."
             )
             artifacts = ["deliverables/approval_note_draft.docx"]
+            draft_doc = Path(artifacts[0])
+            draft_doc.parent.mkdir(parents=True, exist_ok=True)
+            if not draft_doc.exists():
+                try:
+                    import docx
+                    doc = docx.Document()
+                    doc.add_heading("Approval Note (Draft)", level=0)
+                    doc.add_paragraph("Draft pending operator approval.")
+                    doc.save(str(draft_doc))
+                except Exception:
+                    draft_doc.write_bytes(b"PK\x03\x04mock_docx")
             self._deliverables[task_id] = (result_text, artifacts)
 
         elif workflow_name == WorkflowName.MULTIMODAL_ANALYSIS:

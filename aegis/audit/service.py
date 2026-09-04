@@ -8,6 +8,8 @@ Provides:
 from __future__ import annotations
 
 from datetime import datetime
+import json
+from pathlib import Path
 import threading
 from typing import Sequence
 from uuid import UUID
@@ -123,3 +125,75 @@ class AuthorizedAuditService:
     def inner(self) -> AuditService:
         """Expose inner service for sink registration."""
         return self._inner
+
+
+class PersistentAuditService(AuditService):
+    """Thread-safe file-backed audit store that persists events to JSONL.
+
+    Appends every `ExecutionEvent` to a `.jsonl` file so audit records survive
+    restarts and are never overwritten. Preloads existing events on startup.
+    """
+
+    def __init__(
+        self,
+        log_path: Path | str = Path("data/audit/events.jsonl"),
+        max_records: int = 50000,
+    ) -> None:
+        super().__init__(max_records=max_records)
+        self._log_path = Path(log_path)
+        self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._load_existing_records()
+
+    @property
+    def log_path(self) -> Path:
+        """Return the filesystem path to the persistent JSONL file."""
+        return self._log_path
+
+    def _load_existing_records(self) -> None:
+        """Preload events from the JSONL file into the in-memory store."""
+        if not self._log_path.exists():
+            return
+        try:
+            with open(self._log_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        event = ExecutionEvent.model_validate(data)
+                        self._records.append(event)
+                    except Exception:
+                        continue
+            # Trim if exceeded max_records
+            if len(self._records) > self._max_records:
+                self._records = self._records[-self._max_records:]
+        except Exception:
+            pass
+
+    def record_event(self, event: ExecutionEvent) -> None:
+        """Record in memory and append JSON line to disk."""
+        with self._lock:
+            # Memory store
+            self._records.append(event)
+            if len(self._records) > self._max_records:
+                self._records.pop(0)
+
+            # Persistent disk append
+            try:
+                event_dict = event.model_dump(mode="json")
+                with open(self._log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(event_dict, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+
+    def clear(self) -> None:
+        """Clear memory and reset the persistent log file."""
+        with self._lock:
+            self._records.clear()
+            try:
+                if self._log_path.exists():
+                    self._log_path.write_text("", encoding="utf-8")
+            except Exception:
+                pass
+

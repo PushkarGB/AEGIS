@@ -21,7 +21,18 @@ def test_load_config_uses_repository_defaults():
     config = load_config()
 
     assert config.agent.default_model_role == "agent"
-    assert config.models.role_defaults["coding"] == "coding_model_placeholder"
+    assert config.models.role_defaults["coding"] == "coding_model"
+    assert config.models.role_defaults == {
+        "agent": "agent_model",
+        "coding": "coding_model",
+        "vision": "vision_model",
+    }
+    model_tags = {model.id: model.provider_model_id for model in config.models.models}
+    assert model_tags == {
+        "agent_model": "qwen3:8b",
+        "coding_model": "qwen2.5-coder:7b",
+        "vision_model": "qwen3.5:latest",
+    }
     assert any(
         capability.name == "generate_code"
         for capability in config.capabilities.capabilities

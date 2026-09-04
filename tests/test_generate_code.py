@@ -199,8 +199,8 @@ class TestCodingModelPromptInputs:
         for c in constraints:
             assert c in prompt
 
-        # File path is included
-        assert "/data/inspection.xlsx" in prompt
+        # File path is normalized to the sandbox-portable path
+        assert "/workspace/inspection.xlsx" in prompt
 
     def test_coding_model_receives_structured_dict_as_spreadsheet_structure(self):
         router, provider, providers, captured, _ = _setup_router_and_mock_provider("print(1)")
@@ -422,7 +422,8 @@ class TestStandaloneGenerateCodeFunction:
         assert "Calculate corrosion rate" in prompt
         assert "Sheet1: Date, Rate" in prompt
         assert "Print rate" in prompt
-        assert "/tmp/corrosion.xlsx" in prompt
+        # File path is normalized to the sandbox-portable /workspace/<basename> path
+        assert "/workspace/corrosion.xlsx" in prompt
 
     def test_standalone_rejects_empty_objective(self):
         router, provider, _, _, _ = _setup_router_and_mock_provider("print(1)")
@@ -433,6 +434,40 @@ class TestStandaloneGenerateCodeFunction:
                 provider=provider,
                 computation_objective="",
             )
+
+
+class TestGenerateCodeModelInvokedEvent:
+    """Verify that GenerateCodeCapability publishes MODEL_INVOKED events with prompt & raw response."""
+
+    def test_publishes_model_invoked_event_with_prompt_and_response(self):
+        from aegis.events import ExecutionEventPublisher, ExecutionEventType
+
+        code_to_return = "import openpyxl\nprint('result: 10')\n"
+        router, provider, providers, _, _ = _setup_router_and_mock_provider(code_to_return)
+        publisher = ExecutionEventPublisher()
+        cap = GenerateCodeCapability(router=router, providers=providers, event_publisher=publisher)
+
+        req = CapabilityRequest(
+            capability_name="generate_code",
+            inputs={
+                "computation_objective": "Calculate equipment wear",
+                "file_path": "/tmp/test.xlsx",
+            },
+        )
+        result = cap.invoke(req)
+
+        assert result.status == CapabilityResultStatus.SUCCEEDED
+        events = [e for e in publisher.events if e.event_type == ExecutionEventType.MODEL_INVOKED]
+        assert len(events) == 1
+        ev = events[0]
+        assert ev.model_id == "coding_model"
+        assert ev.metadata["role"] == "coding"
+        assert ev.metadata["task_type"] == "code_generation"
+        assert "Calculate equipment wear" in ev.metadata["prompt"]
+        assert "print('result: 10')" in ev.metadata["model_raw_response"]
+        obs = result.observations[0]
+        assert "model_prompt" in obs.data
+        assert "model_raw_response" in obs.data
 
     def test_standalone_fails_on_missing_provider(self):
         router, _, _, _, _ = _setup_router_and_mock_provider("print(1)")

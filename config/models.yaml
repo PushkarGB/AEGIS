@@ -1,6 +1,6 @@
 providers:
-  - id: local_stub
-    kind: local
+  - id: local_ollama
+    kind: ollama
     enabled: true
     endpoint: http://localhost:11434/v1
     timeout_seconds: 60
@@ -11,10 +11,10 @@ providers:
     timeout_seconds: 60
 
 models:
-  - id: agent_model_placeholder
-    name: "Qwen3-8B Agent"
-    provider: local_stub
-    provider_model_id: qwen3-8b-agent
+  - id: agent_model
+    name: "Qwen3 8B Agent"
+    provider: local_ollama
+    provider_model_id: qwen3:8b
     roles:
       - agent
     capabilities:
@@ -33,10 +33,10 @@ models:
     quantization: null
     available: true
     health: unknown
-  - id: coding_model_placeholder
-    name: "Code Model"
-    provider: local_stub
-    provider_model_id: local-coding-model
+  - id: coding_model
+    name: "Qwen2.5 Coder 7B"
+    provider: local_ollama
+    provider_model_id: qwen2.5-coder:7b
     roles:
       - coding
     capabilities:
@@ -52,10 +52,10 @@ models:
     quantization: null
     available: true
     health: unknown
-  - id: vision_model_placeholder
-    name: "Vision Model"
-    provider: local_stub
-    provider_model_id: local-vision-model
+  - id: vision_model
+    name: "Qwen3.5 Vision"
+    provider: local_ollama
+    provider_model_id: qwen3.5:latest
     roles:
       - vision
     capabilities:
@@ -75,6 +75,6 @@ models:
     health: unknown
 
 role_defaults:
-  agent: agent_model_placeholder
-  coding: coding_model_placeholder
-  vision: vision_model_placeholder
+  agent: agent_model
+  coding: coding_model
+  vision: vision_model

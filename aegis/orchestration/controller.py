@@ -142,6 +142,7 @@ class ExecutionController:
         if self.state.observations:
             return self.state.observations[-1]
 
+
         return Observation(
             source="execution_controller",
             kind="task_initialized",
@@ -171,6 +172,13 @@ class ExecutionController:
                 ExecutionEventStatus.REJECTED,
                 rejection_reason,
                 capability_id=decision.action,
+                metadata={
+                    "task_state_snapshot": self.state.model_dump(mode="json"),
+                    "execution_controller_decision": decision.model_dump(mode="json"),
+                    "capability_requested": decision.action,
+                    "rejection_reason": rejection_reason,
+                    "allowed_next_actions": list(self.allowed_next_actions()),
+                },
             )
 
         if self.state.iteration_count >= self.state.max_iterations:
@@ -200,6 +208,13 @@ class ExecutionController:
             f"Invoking {decision.action} through the Capability Broker.",
             capability_id=decision.action,
             request_id=request.request_id,
+            metadata={
+                "task_state_snapshot": self.state.model_dump(mode="json"),
+                "execution_controller_decision": decision.model_dump(mode="json"),
+                "capability_requested": decision.action,
+                "capability_called": decision.action,
+                "allowed_next_actions": list(self.allowed_next_actions()),
+            },
         )
         if decision.action == "run_code":
             self._emit(
@@ -367,6 +382,11 @@ class ExecutionController:
             f"Capability {action} completed.",
             capability_id=action,
             request_id=result.request_id,
+            metadata={
+                "capability_called": action,
+                "status": result.status.value,
+                "task_state_snapshot": self.state.model_dump(mode="json"),
+            },
         )
         if action == "verify_result" and self.workflow.requires_approval and self._hitl is not None:
             # Advance HITL state machine: DRAFT -> WAITING_FOR_APPROVAL.

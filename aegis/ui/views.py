@@ -31,6 +31,7 @@ class UserViewComponents(NamedTuple):
     submit_btn: gr.Button
     events_display: gr.Markdown
     result_display: gr.Markdown
+    download_file: gr.File
     approval_group: gr.Group
     approval_banner: gr.Markdown
     approve_btn: gr.Button
@@ -52,7 +53,16 @@ class AdminViewComponents(NamedTuple):
     sessions_group: gr.Group
     sessions_table: gr.Dataframe
     audit_group: gr.Group
+    audit_user_select: gr.Dropdown
+    audit_session_select: gr.Dropdown
+    audit_request_select: gr.Dropdown
+    audit_refresh_btn: gr.Button
+    audit_summary_md: gr.Markdown
+    audit_model_json: gr.JSON
+    audit_task_state_json: gr.JSON
+    audit_controller_json: gr.JSON
     audit_table: gr.Dataframe
+    audit_live_feed: gr.Markdown
     network_group: gr.Group
     network_summary: gr.Markdown
     network_table: gr.Dataframe
@@ -149,6 +159,13 @@ def build_user_view() -> UserViewComponents:
                 elem_id="result-display",
             )
 
+            download_file = gr.File(
+                label="Download Generated Deliverable",
+                visible=False,
+                interactive=False,
+                elem_id="download-file",
+            )
+
             with gr.Group(visible=False) as approval_group:
                 approval_banner = gr.Markdown(
                     "### Human-In-The-Loop Approval Required\n"
@@ -171,6 +188,7 @@ def build_user_view() -> UserViewComponents:
         submit_btn=submit_btn,
         events_display=events_display,
         result_display=result_display,
+        download_file=download_file,
         approval_group=approval_group,
         approval_banner=approval_banner,
         approve_btn=approve_btn,
@@ -228,21 +246,69 @@ def build_admin_view() -> AdminViewComponents:
 
             # Audit Pane
             with gr.Group(visible=False) as audit_group:
-                gr.Markdown("### Execution Event Audit Log")
-                audit_table = gr.Dataframe(
-                    headers=[
-                        "sequence",
-                        "timestamp",
-                        "event_type",
-                        "status",
-                        "component",
-                        "summary",
-                        "task_id",
-                        "user_id",
-                    ],
-                    datatype=["number", "str", "str", "str", "str", "str", "str", "str"],
-                    interactive=False,
+                gr.Markdown("### Cascading Audit Trail & Execution Inspector")
+                gr.Markdown(
+                    "Inspect persistent audit events grouped hierarchically: "
+                    "**User -> Session -> User Request (Task)**. "
+                    "Logs survive restarts and capture raw model inference, TaskState snapshots, and Controller decisions."
                 )
+                with gr.Row():
+                    audit_user_select = gr.Dropdown(
+                        label="1. User",
+                        choices=[],
+                        value=None,
+                        scale=2,
+                        interactive=True,
+                    )
+                    audit_session_select = gr.Dropdown(
+                        label="2. Session ID",
+                        choices=[],
+                        value=None,
+                        scale=3,
+                        interactive=True,
+                    )
+                    audit_request_select = gr.Dropdown(
+                        label="3. User Request / Task ID",
+                        choices=[],
+                        value=None,
+                        scale=3,
+                        interactive=True,
+                    )
+                    audit_refresh_btn = gr.Button("Refresh", scale=1, min_width=100)
+
+                audit_summary_md = gr.Markdown("*Select User, Session, and Request above to view full execution diagnostics.*")
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        gr.Markdown("#### Agent Model JSON Response")
+                        audit_model_json = gr.JSON(label="Model Raw Responses & Intent / Plan JSON")
+                    with gr.Column(scale=1):
+                        gr.Markdown("#### TaskState Snapshot")
+                        audit_task_state_json = gr.JSON(label="TaskState Snapshot")
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        gr.Markdown("#### Execution Controller Decisions & Capabilities")
+                        audit_controller_json = gr.JSON(label="Controller Decisions & Requested / Called Capabilities")
+
+                with gr.Accordion("Request Execution Event Log", open=True):
+                    audit_table = gr.Dataframe(
+                        headers=[
+                            "sequence",
+                            "timestamp",
+                            "event_type",
+                            "status",
+                            "component",
+                            "summary",
+                            "task_id",
+                            "user_id",
+                        ],
+                        datatype=["number", "str", "str", "str", "str", "str", "str", "str"],
+                        interactive=False,
+                    )
+
+                with gr.Accordion("Live Event Feed (All Sessions)", open=False):
+                    audit_live_feed = gr.Markdown("Loading live events...")
 
             # Network Pane
             with gr.Group(visible=False) as network_group:
@@ -291,10 +357,20 @@ def build_admin_view() -> AdminViewComponents:
         sessions_group=sessions_group,
         sessions_table=sessions_table,
         audit_group=audit_group,
+        audit_user_select=audit_user_select,
+        audit_session_select=audit_session_select,
+        audit_request_select=audit_request_select,
+        audit_refresh_btn=audit_refresh_btn,
+        audit_summary_md=audit_summary_md,
+        audit_model_json=audit_model_json,
+        audit_task_state_json=audit_task_state_json,
+        audit_controller_json=audit_controller_json,
         audit_table=audit_table,
+        audit_live_feed=audit_live_feed,
         network_group=network_group,
         network_summary=network_summary,
         network_table=network_table,
         models_group=models_group,
         models_table=models_table,
     )
+

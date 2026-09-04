@@ -233,7 +233,7 @@ def test_synthetic_computation_fixture_runs_workflow_b_end_to_end(
 
     registry = CapabilityRegistry(config.capabilities)
     registry.register(InspectSpreadsheetCapability())
-    registry.register(GenerateCodeCapability(router=router, providers={"local_stub": coding_provider}))
+    registry.register(GenerateCodeCapability(router=router, providers={"local_ollama": coding_provider}))
     registry.register(RunCodeCapability(sandbox=sandbox))
     registry.register(VerifyResultCapability())
     registry.register(GenerateExcelCapability(output_dir=tmp_path / "deliverables"))
@@ -250,7 +250,7 @@ def test_synthetic_computation_fixture_runs_workflow_b_end_to_end(
         WorkflowName.COMPUTATION,
         RegistryCapabilityBroker(registry),
     )
-    agent = RouterAgentRuntime(config.agent, router, {"local_stub": agent_provider})
+    agent = RouterAgentRuntime(config.agent, router, {"local_ollama": agent_provider})
     loop = SandboxObservationLoop(agent, controller)
 
     # User request -> Agent intent -> Controller-compatible plan.
@@ -332,7 +332,7 @@ def test_synthetic_computation_fixture_runs_workflow_b_end_to_end(
     first_code = first_generation.output["code"]
     assert isinstance(first_code, str)
     assert "KeyError" in first_code
-    assert first_generation.observations[0].data["model_id"] == "coding_model_placeholder"
+    assert first_generation.observations[0].data["model_id"] == "coding_model"
 
     # Sandbox -> observation -> Agent-directed correction -> corrected sandbox execution.
     failed_run = controller.execute(

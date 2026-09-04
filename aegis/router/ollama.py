@@ -122,11 +122,16 @@ def _resolve_endpoints(base_url: str) -> tuple[str, bool]:
 class OllamaModelProvider(ModelProvider):
     """Configurable Ollama adapter beneath the provider-neutral ModelProvider interface.
 
-    Configuration hierarchy:
-    1. Explicit constructor arguments (base_url, model, timeout_seconds, non_thinking)
+    Endpoint and timeout hierarchy:
+    1. Explicit constructor arguments
     2. ModelProviderConfig endpoint/timeout
-    3. Environment variables (OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT, OLLAMA_NON_THINKING)
-    4. Sane local defaults (http://127.0.0.1:11434, qwen2.5:7b, 60s, non_thinking=True)
+    3. Environment variables
+    4. Sane local defaults
+
+    Model-tag hierarchy:
+    1. The routed registry model's ``provider_model_id``
+    2. Explicit/environment ``OLLAMA_MODEL`` configuration for an unregistered model
+    3. The requested model ID
     """
 
     def __init__(
@@ -151,11 +156,16 @@ class OllamaModelProvider(ModelProvider):
                 )
 
         self._provider_config = provider_config
-        self._provider_models: dict[str, str] = (
-            _build_provider_model_map(provider_config.id, model_configs)
-            if provider_config and model_configs
-            else {}
-        )
+        if provider_config and model_configs:
+            self._provider_models = _build_provider_model_map(
+                provider_config.id, model_configs
+            )
+        elif model_configs:
+            self._provider_models = {
+                m.id: m.provider_model_id or m.id for m in model_configs
+            }
+        else:
+            self._provider_models = {}
 
         resolved_base = (
             base_url
@@ -196,18 +206,21 @@ class OllamaModelProvider(ModelProvider):
     def resolve_model_tag(self, requested_model_id: str) -> str:
         """Resolve the model tag to send to the Ollama server.
 
-        Supports Qwen3.5 and other models through configuration.
-        Does not assume a specific tag if the configured server reports a different tag.
+        A configured provider-model mapping is authoritative for a routed
+        registry model. ``OLLAMA_MODEL`` remains a single-model fallback for
+        standalone or otherwise unregistered requests; it must not collapse
+        configured agent, coding, and vision roles onto one tag.
         """
-        env_model = os.getenv("OLLAMA_MODEL")
-        if env_model:
-            target_tag = env_model
-        elif self.config.model:
-            target_tag = self.config.model
-        elif requested_model_id in self._provider_models:
+        if requested_model_id in self._provider_models:
             target_tag = self._provider_models[requested_model_id]
         else:
-            target_tag = requested_model_id
+            env_model = os.getenv("OLLAMA_MODEL")
+            if env_model:
+                target_tag = env_model
+            elif self.config.model:
+                target_tag = self.config.model
+            else:
+                target_tag = requested_model_id
 
         if self._available_models:
             if target_tag in self._available_models:

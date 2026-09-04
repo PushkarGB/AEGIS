@@ -27,6 +27,7 @@ class ExecutionEventType(StrEnum):
     """High-level runtime milestones safe for UI and audit consumers."""
 
     TASK_STARTED = "task_started"
+    DOCUMENT_TYPE_IDENTIFIED = "document_type_identified"
     INTENT_IDENTIFIED = "intent_identified"
     WORKFLOW_SELECTED = "workflow_selected"
     CAPABILITY_STARTED = "capability_started"

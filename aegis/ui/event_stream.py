@@ -40,6 +40,7 @@ Tests may override via ``DeterministicTaskRunner(event_pace_seconds=0.0)``.
 
 _EVENT_LABELS: dict[ExecutionEventType, str] = {
     ExecutionEventType.TASK_STARTED: "Understanding request",
+    ExecutionEventType.DOCUMENT_TYPE_IDENTIFIED: "Identifying document type",
     ExecutionEventType.INTENT_IDENTIFIED: "Understanding request",
     ExecutionEventType.WORKFLOW_SELECTED: "Workflow selected",
     ExecutionEventType.CAPABILITY_STARTED: "Processing step",
@@ -190,15 +191,16 @@ def format_progressive_events(events: list[ExecutionEvent]) -> str:
 
 
 def _status_icon(event: ExecutionEvent) -> str:
-    """Return a status indicator emoji for the event."""
+    """Return a clean, professional status indicator for the event."""
     from aegis.events import ExecutionEventStatus
 
     if event.status == ExecutionEventStatus.COMPLETED:
-        return "✅"
+        return "[DONE]"
     if event.status == ExecutionEventStatus.FAILED:
-        return "❌"
+        return "[FAILED]"
     if event.status == ExecutionEventStatus.REJECTED:
-        return "⛔"
+        return "[REJECTED]"
     if event.status == ExecutionEventStatus.REQUIRES_ACTION:
-        return "⏳"
-    return "🔄"  # STARTED
+        return "[WAITING]"
+    return "[RUNNING]"
+

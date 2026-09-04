@@ -74,13 +74,14 @@ def handle_approval_decision(
     approved: bool,
     current_state: dict[str, Any],
     backend: UIBackendService,
+    include_download: bool = False,
 ) -> tuple[dict[str, Any], ...]:
     """Execute approval or rejection transition and prepare UI component updates."""
     token = current_state.get("token")
     session_id = current_state.get("active_session_id")
     task_id = current_state.get("active_task_id")
     if not token or not session_id or not task_id:
-        return (
+        base_updates = (
             current_state,
             gr.update(),
             gr.update(),
@@ -90,6 +91,9 @@ def handle_approval_decision(
             gr.update(),
             gr.update(),
         )
+        if include_download:
+            return base_updates + (gr.update(),)
+        return base_updates
 
     try:
         res: UITaskResult = backend.record_approval(
@@ -101,7 +105,7 @@ def handle_approval_decision(
     except Exception as exc:
         new_state = dict(current_state)
         new_state["active_task_id"] = None
-        return (
+        base_err = (
             new_state,
             gr.update(),
             gr.update(),
@@ -111,6 +115,9 @@ def handle_approval_decision(
             gr.update(visible=False, interactive=False),
             gr.update(visible=False),
         )
+        if include_download:
+            return base_err + (gr.update(value=None, visible=False),)
+        return base_err
 
     new_state = dict(current_state)
     messages = list(new_state.get("chat_messages", []))
@@ -127,7 +134,7 @@ def handle_approval_decision(
         else "### Decision: Rejected\nTask clearance has been rejected by operator."
     )
 
-    return (
+    base_result = (
         new_state,
         gr.update(value=messages),
         gr.update(value=events_md),
@@ -137,6 +144,18 @@ def handle_approval_decision(
         gr.update(visible=False, interactive=False),
         gr.update(visible=False),
     )
+
+    if include_download:
+        download_update = gr.update(value=None, visible=False)
+        if approved and res.artifact_ids:
+            try:
+                dl_path, dl_name = backend.get_artifact_for_download(token, res.artifact_ids[0])
+                download_update = gr.update(value=dl_path, label=f"Download Deliverable ({dl_name})", visible=True)
+            except Exception:
+                download_update = gr.update(value=None, visible=False)
+        return base_result + (download_update,)
+
+    return base_result
 
 
 def create_app(service: UIBackendService | None = None) -> gr.Blocks:
@@ -265,6 +284,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 gr.update(value="*No events recorded yet.*"),
                 gr.update(value="*Awaiting execution...*"),
                 gr.update(visible=False),  # approval_group
+                gr.update(value=None, visible=False),  # download_file
             )
 
         logout_outputs = [
@@ -281,6 +301,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
             user_view.events_display,
             user_view.result_display,
             user_view.approval_group,
+            user_view.download_file,
         ]
 
         user_view.logout_btn.click(
@@ -301,7 +322,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
         def handle_new_session(current_state: dict[str, Any]):
             token = current_state.get("token")
             if not token:
-                return current_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+                return current_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
             new_sess = backend.create_session(token)
             sessions = backend.list_sessions(token)
@@ -319,6 +340,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 gr.update(value="*New session started. Submit a task.*"),
                 gr.update(value="*Awaiting execution...*"),
                 gr.update(visible=False),
+                gr.update(value=None, visible=False),
             )
 
         user_view.new_session_btn.click(
@@ -331,6 +353,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 user_view.events_display,
                 user_view.result_display,
                 user_view.approval_group,
+                user_view.download_file,
             ],
         )
 
@@ -340,7 +363,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
         def handle_session_change(selected_label: str | None, current_state: dict[str, Any]):
             token = current_state.get("token")
             if not token or not selected_label:
-                return current_state, gr.update(), gr.update(), gr.update()
+                return current_state, gr.update(), gr.update(), gr.update(), gr.update()
 
             # Find matching session by prefix
             sessions = backend.list_sessions(token)
@@ -358,6 +381,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 gr.update(value=[]),
                 gr.update(value=f"*Switched to session {prefix}.*"),
                 gr.update(visible=False),
+                gr.update(value=None, visible=False),
             )
 
         user_view.session_list.change(
@@ -368,6 +392,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 user_view.chat_history,
                 user_view.events_display,
                 user_view.approval_group,
+                user_view.download_file,
             ],
         )
 
@@ -384,6 +409,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
             if not token or not session_id or not prompt.strip():
                 return (
                     current_state,
+                    gr.update(),
                     gr.update(),
                     gr.update(),
                     gr.update(),
@@ -421,6 +447,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                     gr.update(),   # reject_btn — no update yet
                     gr.update(),   # approval_banner — no update yet
                     gr.update(),   # approval_result_msg — no update yet
+                    gr.update(),   # download_file — no update yet
                 )
 
             # Final yield with complete result
@@ -447,6 +474,14 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
             events_md = format_progressive_events(final_result.events)
             is_awaiting_approval = (final_result.hitl_state == HITLApprovalState.WAITING_FOR_APPROVAL)
 
+            download_update = gr.update(visible=False, value=None)
+            if final_result.artifact_ids:
+                try:
+                    dl_path, dl_name = backend.get_artifact_for_download(token, final_result.artifact_ids[0])
+                    download_update = gr.update(value=dl_path, label=f"Download Deliverable ({dl_name})", visible=True)
+                except Exception:
+                    download_update = gr.update(visible=False, value=None)
+
             yield (
                 new_state,
                 gr.update(value=messages),
@@ -458,6 +493,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 gr.update(visible=is_awaiting_approval, interactive=is_awaiting_approval),
                 gr.update(visible=is_awaiting_approval),
                 gr.update(value="", visible=False),
+                download_update,
             )
 
         user_view.submit_btn.click(
@@ -474,6 +510,7 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 user_view.reject_btn,
                 user_view.approval_banner,
                 user_view.approval_result_msg,
+                user_view.download_file,
             ],
         )
 
@@ -489,16 +526,17 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
             user_view.approve_btn,
             user_view.reject_btn,
             user_view.approval_banner,
+            user_view.download_file,
         ]
 
         user_view.approve_btn.click(
-            fn=lambda s: handle_approval_decision(True, s, backend),
+            fn=lambda s: handle_approval_decision(True, s, backend, include_download=True),
             inputs=[state],
             outputs=approval_outputs,
         )
 
         user_view.reject_btn.click(
-            fn=lambda s: handle_approval_decision(False, s, backend),
+            fn=lambda s: handle_approval_decision(False, s, backend, include_download=True),
             inputs=[state],
             outputs=approval_outputs,
         )
@@ -511,7 +549,8 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
             if not token:
                 return (
                     gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-                    gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+                    gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
+                    gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
                 )
 
             # Determine visibility of each pane
@@ -529,6 +568,10 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
             net_sum = gr.update()
             net_df = gr.update()
             models_df = gr.update()
+            audit_users = gr.update()
+            audit_sess = gr.update()
+            audit_req = gr.update()
+            audit_live = gr.update()
 
             if vis_dash:
                 data = backend.get_admin_dashboard(token)
@@ -548,6 +591,12 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                     for l in logs
                 ]
                 audit_df = gr.update(value=rows)
+                grouped = backend.get_admin_audit_grouped(token)
+                users = sorted(grouped.keys())
+                audit_users = gr.update(choices=users, value=None)
+                audit_sess = gr.update(choices=[], value=None)
+                audit_req = gr.update(choices=[], value=None)
+                audit_live = gr.update(value=backend.get_admin_audit_live_feed(token))
             elif vis_net:
                 net_data = backend.get_admin_network(token)
                 net_sum = gr.update(value=_format_network_summary(net_data["summary"]))
@@ -578,6 +627,10 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 net_sum,
                 net_df,
                 models_df,
+                audit_users,
+                audit_sess,
+                audit_req,
+                audit_live,
             )
 
         admin_view.nav_radio.change(
@@ -597,7 +650,182 @@ def create_app(service: UIBackendService | None = None) -> gr.Blocks:
                 admin_view.network_summary,
                 admin_view.network_table,
                 admin_view.models_table,
+                admin_view.audit_user_select,
+                admin_view.audit_session_select,
+                admin_view.audit_request_select,
+                admin_view.audit_live_feed,
+            ],
+        )
+
+        # ------------------------------------------------------------------
+        # 8. Cascading Admin Audit Handlers
+        # ------------------------------------------------------------------
+        def handle_audit_user_change(selected_user: str | None, current_state: dict[str, Any]):
+            token = current_state.get("token")
+            if not token or not selected_user:
+                return (
+                    gr.update(choices=[], value=None),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="*Select User, Session, and Request above to view full execution diagnostics.*"),
+                    gr.update(value=None),
+                    gr.update(value=None),
+                    gr.update(value=None),
+                    gr.update(value=[]),
+                )
+            sessions = backend.get_admin_audit_sessions(token, selected_user)
+            return (
+                gr.update(choices=sessions, value=None),
+                gr.update(choices=[], value=None),
+                gr.update(value=f"*Selected user **{selected_user}**. Please select a session ID.*"),
+                gr.update(value=None),
+                gr.update(value=None),
+                gr.update(value=None),
+                gr.update(value=[]),
+            )
+
+        admin_view.audit_user_select.change(
+            fn=handle_audit_user_change,
+            inputs=[admin_view.audit_user_select, state],
+            outputs=[
+                admin_view.audit_session_select,
+                admin_view.audit_request_select,
+                admin_view.audit_summary_md,
+                admin_view.audit_model_json,
+                admin_view.audit_task_state_json,
+                admin_view.audit_controller_json,
+                admin_view.audit_table,
+            ],
+        )
+
+        def handle_audit_session_change(
+            selected_user: str | None,
+            selected_session: str | None,
+            current_state: dict[str, Any],
+        ):
+            token = current_state.get("token")
+            if not token or not selected_user or not selected_session:
+                return (
+                    gr.update(choices=[], value=None),
+                    gr.update(value="*Select User, Session, and Request above to view full execution diagnostics.*"),
+                    gr.update(value=None),
+                    gr.update(value=None),
+                    gr.update(value=None),
+                    gr.update(value=[]),
+                )
+            tasks = backend.get_admin_audit_tasks(token, selected_user, selected_session)
+            return (
+                gr.update(choices=tasks, value=None),
+                gr.update(value=f"*Selected session `{selected_session}`. Please select a user request / task ID.*"),
+                gr.update(value=None),
+                gr.update(value=None),
+                gr.update(value=None),
+                gr.update(value=[]),
+            )
+
+        admin_view.audit_session_select.change(
+            fn=handle_audit_session_change,
+            inputs=[admin_view.audit_user_select, admin_view.audit_session_select, state],
+            outputs=[
+                admin_view.audit_request_select,
+                admin_view.audit_summary_md,
+                admin_view.audit_model_json,
+                admin_view.audit_task_state_json,
+                admin_view.audit_controller_json,
+                admin_view.audit_table,
+            ],
+        )
+
+        def handle_audit_request_change(
+            selected_user: str | None,
+            selected_session: str | None,
+            selected_request: str | None,
+            current_state: dict[str, Any],
+        ):
+            token = current_state.get("token")
+            if not token or not selected_user or not selected_session or not selected_request:
+                return (
+                    gr.update(value="*Select User, Session, and Request above to view full execution diagnostics.*"),
+                    gr.update(value=None),
+                    gr.update(value=None),
+                    gr.update(value=None),
+                    gr.update(value=[]),
+                )
+            summary = backend.get_admin_audit_diagnostic_summary(
+                token, selected_user, selected_session, selected_request
+            )
+            req_caps = ", ".join(f"`{c}`" for c in summary["capabilities_requested"]) or "None"
+            call_caps = ", ".join(f"`{c}`" for c in summary["capabilities_called"]) or "None"
+            summary_text = (
+                f"### Execution Diagnostics: Request `{selected_request}`\n"
+                f"- **User**: **{selected_user}** | **Session**: `{selected_session}`\n"
+                f"- **Total Events Recorded**: `{summary['total_events']}`\n"
+                f"- **Capabilities Requested**: {req_caps}\n"
+                f"- **Capabilities Called**: {call_caps}"
+            )
+            model_json = summary["model_responses"]
+            task_state_json = summary["task_state_snapshots"]
+            controller_json = {
+                "controller_decisions": summary["controller_decisions"],
+                "capabilities_requested": summary["capabilities_requested"],
+                "capabilities_called": summary["capabilities_called"],
+            }
+            rows = [
+                [
+                    ev.get("sequence", 0),
+                    ev.get("timestamp", "").split("T")[-1][:8] if "T" in str(ev.get("timestamp", "")) else str(ev.get("timestamp", "")),
+                    str(ev.get("event_type", "")),
+                    str(ev.get("status", "")),
+                    str(ev.get("component", "")),
+                    str(ev.get("summary", "")),
+                    str(ev.get("task_id", ""))[:8],
+                    str(ev.get("user_id") or "-"),
+                ]
+                for ev in summary["events"]
+            ]
+            return (
+                gr.update(value=summary_text),
+                gr.update(value=model_json),
+                gr.update(value=task_state_json),
+                gr.update(value=controller_json),
+                gr.update(value=rows),
+            )
+
+        admin_view.audit_request_select.change(
+            fn=handle_audit_request_change,
+            inputs=[admin_view.audit_user_select, admin_view.audit_session_select, admin_view.audit_request_select, state],
+            outputs=[
+                admin_view.audit_summary_md,
+                admin_view.audit_model_json,
+                admin_view.audit_task_state_json,
+                admin_view.audit_controller_json,
+                admin_view.audit_table,
+            ],
+        )
+
+        def handle_audit_refresh(current_state: dict[str, Any]):
+            token = current_state.get("token")
+            if not token:
+                return gr.update(), gr.update(), gr.update(), gr.update()
+            grouped = backend.get_admin_audit_grouped(token)
+            users = sorted(grouped.keys())
+            feed = backend.get_admin_audit_live_feed(token)
+            return (
+                gr.update(choices=users, value=None),
+                gr.update(choices=[], value=None),
+                gr.update(choices=[], value=None),
+                gr.update(value=feed),
+            )
+
+        admin_view.audit_refresh_btn.click(
+            fn=handle_audit_refresh,
+            inputs=[state],
+            outputs=[
+                admin_view.audit_user_select,
+                admin_view.audit_session_select,
+                admin_view.audit_request_select,
+                admin_view.audit_live_feed,
             ],
         )
 
     return demo
+

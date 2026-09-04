@@ -568,6 +568,70 @@ def test_agent_routes_through_ollama_provider(fake_ollama_server: str) -> None:
     assert req["body"]["model"] == "qwen2.5:7b"
 
 
+def test_routed_registry_models_use_distinct_ollama_tags(
+    fake_ollama_server: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A global fallback must not override configured role-specific model tags."""
+    monkeypatch.setenv("OLLAMA_MODEL", "global-fallback-model")
+
+    registry_config = ModelRegistryConfig(
+        providers=[
+            ModelProviderConfig(
+                id="ollama_provider",
+                kind="ollama",
+                enabled=True,
+                endpoint=fake_ollama_server,
+            )
+        ],
+        models=[
+            ModelConfig(
+                id="agent_model",
+                provider="ollama_provider",
+                provider_model_id="qwen3:8b",
+                roles=["agent"],
+                capabilities=["text_generation", "reasoning", "planning", "drafting"],
+            ),
+            ModelConfig(
+                id="coding_model",
+                provider="ollama_provider",
+                provider_model_id="qwen2.5-coder:7b",
+                roles=["coding"],
+                capabilities=["text_generation", "code_generation"],
+            ),
+            ModelConfig(
+                id="vision_model",
+                provider="ollama_provider",
+                provider_model_id="qwen3.5:latest",
+                roles=["vision"],
+                capabilities=["text_generation", "image_understanding"],
+            ),
+        ],
+        role_defaults={
+            "agent": "agent_model",
+            "coding": "coding_model",
+            "vision": "vision_model",
+        },
+    )
+    provider = OllamaModelProvider(
+        provider_config=registry_config.providers[0],
+        model_configs=registry_config.models,
+    )
+    router = ModelRouter(ModelRegistry(registry_config))
+
+    expected_tags = {
+        "general_reasoning": "qwen3:8b",
+        "code_generation": "qwen2.5-coder:7b",
+        "visual_reasoning": "qwen3.5:latest",
+    }
+    for task_type, expected_tag in expected_tags.items():
+        routing = router.route(task_type)
+        provider.generate(
+            ModelGenerationRequest(model_id=routing.model_id, prompt=f"Test {task_type}.")
+        )
+        assert FakeOllamaHandler.recorded_requests[-1]["body"]["model"] == expected_tag
+
+
 # ── Clearly Marked Manual Integration Check for Real Endpoint ────────
 
 

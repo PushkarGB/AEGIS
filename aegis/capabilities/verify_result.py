@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 import re
 from typing import Any
 
@@ -450,8 +451,138 @@ def verify_computation_result(
     )
 
 
+def verify_document_drafting_result(
+    draft_data: dict[str, Any] | None,
+    docx_path: str | Path | None = None,
+    required_sections: list[str] | None = None,
+) -> VerificationOutcome:
+    """Deterministically verify document-drafting outputs.
+
+    Checks:
+    1. Draft content structure: required sections (key_findings, supporting_observations, recommendations) exist and are non-empty.
+    2. Fact/recommendation separation: recommendations are distinct from factual findings.
+    3. Approval status: approval status is set to a draft/pending state before operator decision.
+    4. Artifact existence: DOCX file exists on disk and is non-empty.
+    """
+    checks: list[VerificationCheck] = []
+    sections_to_check = required_sections or ["key_findings", "supporting_observations", "recommendations"]
+
+    # 1. Draft structure check
+    has_data = isinstance(draft_data, dict) and bool(draft_data)
+    missing_sections: list[str] = []
+    empty_sections: list[str] = []
+
+    if has_data:
+        assert draft_data is not None
+        for sec in sections_to_check:
+            val = draft_data.get(sec)
+            if val is None:
+                missing_sections.append(sec)
+            elif isinstance(val, (list, tuple)) and len(val) == 0:
+                empty_sections.append(sec)
+            elif isinstance(val, str) and not val.strip():
+                empty_sections.append(sec)
+
+    struct_passed = has_data and not missing_sections and not empty_sections
+    reasons: list[str] = []
+    if not has_data:
+        reasons.append("no draft data provided")
+    if missing_sections:
+        reasons.append(f"missing sections: {', '.join(missing_sections)}")
+    if empty_sections:
+        reasons.append(f"empty sections: {', '.join(empty_sections)}")
+
+    checks.append(
+        VerificationCheck(
+            name="draft_structure_valid",
+            passed=struct_passed,
+            message=(
+                f"Draft structure is valid with all required sections present: {', '.join(sections_to_check)}."
+                if struct_passed
+                else f"Draft structure invalid: {'; '.join(reasons)}."
+            ),
+            details={"missing": missing_sections, "empty": empty_sections},
+        )
+    )
+
+    # 2. Fact/recommendation separation check
+    separation_passed = True
+    if has_data and struct_passed:
+        assert draft_data is not None
+        findings = set(str(f).strip().lower() for f in draft_data.get("key_findings", []))
+        recs = set(str(r).strip().lower() for r in draft_data.get("recommendations", []))
+        overlap = findings.intersection(recs)
+        if overlap:
+            separation_passed = False
+
+    checks.append(
+        VerificationCheck(
+            name="facts_recommendations_separated",
+            passed=separation_passed,
+            message=(
+                "Extracted facts and recommendations are distinct."
+                if separation_passed
+                else "Findings and recommendations overlap."
+            ),
+            details={},
+        )
+    )
+
+    # 3. Approval status check: must be draft / pending
+    status_str = str(draft_data.get("approval_status", "")) if has_data and draft_data else ""
+    status_passed = bool(status_str) and any(w in status_str.upper() for w in ("DRAFT", "PENDING"))
+    checks.append(
+        VerificationCheck(
+            name="approval_status_governed",
+            passed=status_passed,
+            message=(
+                f"Approval status is governed ({status_str})."
+                if status_passed
+                else f"Approval status invalid or uninitialized ({status_str})."
+            ),
+            details={"approval_status": status_str},
+        )
+    )
+
+    # 4. Artifact existence check (if docx_path provided)
+    if docx_path:
+        p = Path(docx_path)
+        art_exists = p.exists() and p.is_file() and p.stat().st_size > 0
+        checks.append(
+            VerificationCheck(
+                name="deliverable_artifact_valid",
+                passed=art_exists,
+                message=(
+                    f"Deliverable artifact exists ({p.name}, {p.stat().st_size if art_exists else 0} bytes)."
+                    if art_exists
+                    else f"Deliverable artifact not found or empty: {p}."
+                ),
+                details={"path": str(p)},
+            )
+        )
+
+    passed_count = sum(1 for c in checks if c.passed)
+    failed_count = sum(1 for c in checks if not c.passed)
+    overall_verified = (failed_count == 0)
+
+    if overall_verified:
+        summary = f"All {passed_count} document drafting verification checks passed."
+    else:
+        failed_names = [c.name for c in checks if not c.passed]
+        summary = f"Document drafting verification failed on check(s): {', '.join(failed_names)}."
+
+    return VerificationOutcome(
+        verified=overall_verified,
+        checks=checks,
+        passed_count=passed_count,
+        failed_count=failed_count,
+        summary=summary,
+        data=draft_data,
+    )
+
+
 class VerifyResultCapability(Capability):
-    """Deterministic capability applying verification rules to computation results.
+    """Deterministic capability applying verification rules to computation and document outputs.
 
     Implements the 'verify_result' capability in Workflow B.
     Runs completely without LLMs or external network access.
@@ -537,18 +668,28 @@ class VerifyResultCapability(Capability):
         numeric_bounds = inputs.get("numeric_bounds") or inputs.get("bounds")
         context = inputs.get("context") or inputs.get("computation_context")
 
-        outcome = verify_computation_result(
-            stdout=str(stdout) if stdout is not None else None,
-            stderr=str(stderr) if stderr is not None else None,
-            exit_code=int(exit_code) if exit_code is not None else None,
-            timed_out=timed_out,
-            data=data,
-            expected_fields=list(expected_fields) if expected_fields else None,
-            computation_objective=str(computation_objective) if computation_objective else None,
-            min_row_count=int(min_row_count) if min_row_count is not None else None,
-            numeric_bounds=numeric_bounds if isinstance(numeric_bounds, dict) else None,
-            context=context if isinstance(context, dict) else None,
-        )
+        # If document drafting inputs are provided, verify using document drafting rules
+        draft_data = inputs.get("draft_data") or inputs.get("approval_note") or inputs.get("draft")
+        docx_path = inputs.get("docx_path") or inputs.get("file_path") or inputs.get("artifact_path")
+        if draft_data is not None:
+            outcome = verify_document_drafting_result(
+                draft_data=draft_data if isinstance(draft_data, dict) else None,
+                docx_path=docx_path,
+                required_sections=inputs.get("required_sections"),
+            )
+        else:
+            outcome = verify_computation_result(
+                stdout=str(stdout) if stdout is not None else None,
+                stderr=str(stderr) if stderr is not None else None,
+                exit_code=int(exit_code) if exit_code is not None else None,
+                timed_out=timed_out,
+                data=data,
+                expected_fields=list(expected_fields) if expected_fields else None,
+                computation_objective=str(computation_objective) if computation_objective else None,
+                min_row_count=int(min_row_count) if min_row_count is not None else None,
+                numeric_bounds=numeric_bounds if isinstance(numeric_bounds, dict) else None,
+                context=context if isinstance(context, dict) else None,
+            )
 
         output: JsonObject = {
             "verified": outcome.verified,

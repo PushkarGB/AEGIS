@@ -269,7 +269,45 @@ def test_audit_service_is_importable():
 
 
 def test_ui_package_is_importable():
-    from aegis.ui import UIBackendService, create_app
+    from aegis.ui import UIBackendService, create_app, RuntimeTaskRunner, DeterministicTaskRunner
     assert UIBackendService.__name__ == "UIBackendService"
+    assert RuntimeTaskRunner.__name__ == "RuntimeTaskRunner"
+    assert DeterministicTaskRunner.__name__ == "DeterministicTaskRunner"
     assert callable(create_app)
+
+
+def test_real_computation_workflow_classes_are_importable():
+    from aegis.capabilities import FinishCapability
+    from aegis.orchestration import RuntimeTaskRunner
+    assert FinishCapability.__name__ == "FinishCapability"
+    assert RuntimeTaskRunner.__name__ == "RuntimeTaskRunner"
+
+
+def test_document_drafting_classes_are_importable():
+    from aegis.capabilities import (
+        DraftApprovalNoteCapability,
+        ExtractDocumentCapability,
+        GenerateWordCapability,
+        create_approval_note_docx,
+        extract_document_text,
+        verify_document_drafting_result,
+    )
+    from aegis.data import DocumentCategory, DocumentTypeResult, identify_document_type
+    assert ExtractDocumentCapability.__name__ == "ExtractDocumentCapability"
+    assert DraftApprovalNoteCapability.__name__ == "DraftApprovalNoteCapability"
+    assert GenerateWordCapability.__name__ == "GenerateWordCapability"
+    assert callable(create_approval_note_docx)
+    assert callable(extract_document_text)
+    assert callable(verify_document_drafting_result)
+    assert DocumentCategory.PDF == "pdf"
+    assert DocumentTypeResult.__name__ == "DocumentTypeResult"
+    assert callable(identify_document_type)
+
+
+def test_artifacts_package_is_importable():
+    from aegis.artifacts import ArtifactRecord, ArtifactStore, infer_artifact_media_type
+    assert ArtifactRecord.__name__ == "ArtifactRecord"
+    assert ArtifactStore.__name__ == "ArtifactStore"
+    assert callable(infer_artifact_media_type)
+
 

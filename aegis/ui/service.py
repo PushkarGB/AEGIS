@@ -15,10 +15,17 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from aegis.audit import AuditService, AuthorizedAuditService
+from aegis.artifacts import ArtifactRecord, ArtifactStore, infer_artifact_media_type
+from aegis.audit import (
+    AuditLogReader,
+    AuditService,
+    AuthorizedAuditService,
+    PersistentAuditService,
+)
 from aegis.auth import (
     AuthService,
     AuditGuard,
+    Permission,
     SessionGuard,
     SystemGuard,
     UserIdentity,
@@ -30,7 +37,7 @@ from aegis.config import load_config
 from aegis.events import ExecutionEvent, ExecutionEventPublisher
 from aegis.orchestration.hitl import HITLApprovalState
 from aegis.router import ModelRegistry
-from aegis.schemas import FinalStatus
+from aegis.schemas import Artifact, FinalStatus
 from aegis.security import (
     AuthorizedNetworkMonitor,
     InMemoryNetworkCollector,
@@ -39,7 +46,7 @@ from aegis.security import (
 from aegis.sessions import AuthorizedSessionService, SessionRecord, SessionService, TaskRecord, TaskStatus
 from aegis.sessions.sqlite_store import SqliteStoreFactory
 from aegis.ui.event_stream import SessionEventCollector, format_progressive_events
-from aegis.ui.runner import DeterministicTaskRunner, ExecutionRunResult
+from aegis.ui.runner import DeterministicTaskRunner, ExecutionRunResult, RuntimeTaskRunner
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,7 @@ class UITaskResult:
     events: list[ExecutionEvent]
     result_text: str
     artifact_paths: list[str]
+    artifact_ids: list[UUID] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -81,12 +89,20 @@ class UIBackendService:
         network_monitor: AuthorizedNetworkMonitor | None = None,
         model_registry: ModelRegistry | None = None,
         db_path: str = ":memory:",
+        runner: Any | None = None,
+        agent_runtime: Any | None = None,
+        model_providers: dict[str, Any] | None = None,
+        sandbox_runner: Any | None = None,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         # Auth & Guards
         self._auth = auth_service or AuthService()
         self._session_guard = SessionGuard(self._auth)
         self._audit_guard = AuditGuard(self._auth)
         self._system_guard = SystemGuard(self._auth)
+
+        # Artifact Store
+        self._artifacts = artifact_store or ArtifactStore()
 
         # Persistence & Sessions
         if session_service is None:
@@ -97,10 +113,17 @@ class UIBackendService:
             self._sessions = session_service
 
         # Event stream & Audit
-        self._publisher = ExecutionEventPublisher()
-        self._audit = audit_service or AuditService()
+        # When a pre-built runner is injected, adopt its event publisher so
+        # audit, streaming collectors, and the runner all share a single pipeline.
+        if runner is not None and hasattr(runner, "event_publisher"):
+            self._publisher = runner.event_publisher
+        else:
+            self._publisher = ExecutionEventPublisher()
+        self._audit = audit_service or PersistentAuditService()
         self._publisher.subscribe(self._audit)
         self._auth_audit = AuthorizedAuditService(self._audit)
+        log_path = getattr(self._audit, "log_path", Path("data/audit/events.jsonl"))
+        self._audit_reader = AuditLogReader(log_path=log_path)
 
         # Network Monitor
         if network_monitor is None:
@@ -117,16 +140,78 @@ class UIBackendService:
         else:
             self._models = model_registry
 
-        # Deterministic Runner (with 0 pacing for non-streaming; streaming uses default)
-        self._runner = DeterministicTaskRunner(
-            event_publisher=self._publisher,
-            event_pace_seconds=0.0,
-        )
+        # Task Runner (RuntimeTaskRunner for real AEGIS runtime; DeterministicTaskRunner for mock)
+        if runner is not None:
+            self._runner = runner
+        elif agent_runtime is not None or model_providers is not None:
+            self._runner = RuntimeTaskRunner(
+                event_publisher=self._publisher,
+                agent_runtime=agent_runtime,
+                providers=model_providers,
+                sandbox_runner=sandbox_runner,
+                event_pace_seconds=0.0,
+            )
+        else:
+            self._runner = DeterministicTaskRunner(
+                event_publisher=self._publisher,
+                event_pace_seconds=0.0,
+            )
 
     @property
     def event_publisher(self) -> ExecutionEventPublisher:
         """Expose publisher for streaming event collection."""
         return self._publisher
+
+    @property
+    def artifact_store(self) -> ArtifactStore:
+        """Access the internal artifact store."""
+        return self._artifacts
+
+    def _register_run_artifacts(
+        self,
+        task_id: UUID,
+        session_id: UUID,
+        user_id: str,
+        run_res: ExecutionRunResult,
+    ) -> list[UUID]:
+        """Register all task artifacts in ArtifactStore and return artifact IDs."""
+        registered_ids: list[UUID] = []
+        registered_locations: set[str] = set()
+
+        # 1. Register artifacts from controller.state if available
+        ctrl = self._runner.get_controller(task_id)
+        if ctrl is not None:
+            for art in ctrl.state.generated_artifacts:
+                record = self._artifacts.register(
+                    task_id=task_id,
+                    session_id=session_id,
+                    user_id=user_id,
+                    artifact=art,
+                )
+                registered_ids.append(record.artifact_id)
+                registered_locations.add(str(Path(art.location).resolve()))
+
+        # 2. Register any additional artifact paths reported in run_res.artifact_paths
+        for path_str in run_res.artifact_paths:
+            resolved = str(Path(path_str).resolve())
+            if resolved in registered_locations:
+                continue
+            art = Artifact(
+                name=Path(path_str).name,
+                media_type=infer_artifact_media_type(path_str),
+                location=path_str,
+                description="Task generated deliverable",
+            )
+            record = self._artifacts.register(
+                task_id=task_id,
+                session_id=session_id,
+                user_id=user_id,
+                artifact=art,
+            )
+            registered_ids.append(record.artifact_id)
+            registered_locations.add(resolved)
+
+        return registered_ids
 
     # ------------------------------------------------------------------
     # Authentication Operations
@@ -233,6 +318,13 @@ class UIBackendService:
             user=user,
         )
 
+        artifact_ids = self._register_run_artifacts(
+            task_id=task_record.task_id,
+            session_id=session_id,
+            user_id=user.user_id,
+            run_res=run_res,
+        )
+
         return UITaskResult(
             task_id=task_record.task_id,
             session_id=session_id,
@@ -242,6 +334,7 @@ class UIBackendService:
             events=run_res.events,
             result_text=run_res.result_text,
             artifact_paths=run_res.artifact_paths,
+            artifact_ids=artifact_ids,
         )
 
     def submit_task_streaming(
@@ -301,10 +394,13 @@ class UIBackendService:
         )
 
         # Build a separate runner with pacing enabled for streaming
-        streaming_runner = DeterministicTaskRunner(
-            event_publisher=self._publisher,
-            event_pace_seconds=MOCK_EVENT_PACE_SECONDS,
-        )
+        if isinstance(self._runner, RuntimeTaskRunner):
+            streaming_runner = self._runner
+        else:
+            streaming_runner = DeterministicTaskRunner(
+                event_publisher=self._publisher,
+                event_pace_seconds=MOCK_EVENT_PACE_SECONDS,
+            )
 
         # Run execution in background thread
         run_result_holder: list[ExecutionRunResult] = []
@@ -374,6 +470,13 @@ class UIBackendService:
             user=user,
         )
 
+        artifact_ids = self._register_run_artifacts(
+            task_id=task_record.task_id,
+            session_id=session_id,
+            user_id=user.user_id,
+            run_res=run_res,
+        )
+
         final_result = UITaskResult(
             task_id=task_record.task_id,
             session_id=session_id,
@@ -383,6 +486,7 @@ class UIBackendService:
             events=all_events if all_events else run_res.events,
             result_text=run_res.result_text,
             artifact_paths=run_res.artifact_paths,
+            artifact_ids=artifact_ids,
         )
 
         yield UIStreamUpdate(
@@ -416,6 +520,13 @@ class UIBackendService:
             user=user,
         )
 
+        artifact_ids = self._register_run_artifacts(
+            task_id=task_id,
+            session_id=session_id,
+            user_id=user.user_id,
+            run_res=run_res,
+        )
+
         return UITaskResult(
             task_id=task_id,
             session_id=session_id,
@@ -425,7 +536,85 @@ class UIBackendService:
             events=run_res.events,
             result_text=run_res.result_text,
             artifact_paths=run_res.artifact_paths,
+            artifact_ids=artifact_ids,
         )
+
+    # ------------------------------------------------------------------
+    # Artifact Operations (Controlled Access)
+    # ------------------------------------------------------------------
+
+    def register_artifact(
+        self,
+        task_id: UUID,
+        session_id: UUID,
+        user_id: str,
+        artifact: Artifact,
+    ) -> ArtifactRecord:
+        """Register an artifact in the artifact store."""
+        return self._artifacts.register(
+            task_id=task_id,
+            session_id=session_id,
+            user_id=user_id,
+            artifact=artifact,
+        )
+
+    def get_artifact(
+        self,
+        token_str: str,
+        artifact_id: UUID,
+    ) -> ArtifactRecord:
+        """Fetch an artifact record with ownership check.
+
+        Raises:
+            AuthenticationError: Invalid/expired token.
+            AuthorizationError: User lacks permission or doesn't own artifact.
+            FileNotFoundError: Artifact record not found.
+        """
+        user = self._session_guard.require_download_artifact(token_str)
+        record = self._artifacts.get(artifact_id)
+        if record is None:
+            raise FileNotFoundError(f"Artifact '{artifact_id}' not found.")
+
+        if user.role != UserRole.ADMIN and record.user_id not in (user.user_id, user.username):
+            raise AuthorizationError(
+                f"User '{user.user_id}' is not authorized to access artifact '{artifact_id}'.",
+                required_permission=str(Permission.DOWNLOAD_ARTIFACT),
+                actual_role=str(user.role),
+                user_id=user.user_id,
+            )
+
+        return record
+
+    def get_artifact_for_download(
+        self,
+        token_str: str,
+        artifact_id: UUID,
+    ) -> tuple[str, str]:
+        """Verify authorization and return (file_path, display_name) for download.
+
+        Raises:
+            AuthenticationError: Invalid/expired token.
+            AuthorizationError: User lacks permission or doesn't own artifact.
+            FileNotFoundError: Artifact record or file on disk not found.
+        """
+        record = self.get_artifact(token_str, artifact_id)
+        file_path = Path(record.location)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Artifact file '{record.name}' is missing on disk.")
+
+        return str(file_path), record.name
+
+    def list_task_artifacts(
+        self,
+        token_str: str,
+        task_id: UUID,
+    ) -> list[ArtifactRecord]:
+        """List artifacts for a task visible to the caller."""
+        user = self._session_guard.require_download_artifact(token_str)
+        records = self._artifacts.list_for_task(task_id)
+        if user.role != UserRole.ADMIN:
+            records = [r for r in records if r.user_id in (user.user_id, user.username)]
+        return records
 
     # ------------------------------------------------------------------
     # Admin Operations (Guarded by RBAC)
@@ -498,6 +687,57 @@ class UIBackendService:
             }
             for r in records
         ]
+
+    def get_admin_audit_grouped(
+        self, token_str: str
+    ) -> dict[str, dict[str, dict[str, list[dict[str, Any]]]]]:
+        """Return audit logs grouped by user_id -> session_id -> task_id (ADMIN only)."""
+        self._audit_guard.require_view_all_audit(token_str)
+        return self._audit_reader.get_grouped_logs()
+
+    def get_admin_audit_diagnostic_summary(
+        self, token_str: str, user_id: str, session_id: str, task_id: str
+    ) -> dict[str, Any]:
+        """Return diagnostic payload for a specific request (ADMIN only)."""
+        self._audit_guard.require_view_all_audit(token_str)
+        return self._audit_reader.get_request_diagnostic_summary(
+            user_id=user_id, session_id=session_id, task_id=task_id
+        )
+
+    def get_admin_audit_sessions(self, token_str: str, user_id: str) -> list[str]:
+        """Return session IDs for user sorted newest first by timestamp (ADMIN only)."""
+        self._audit_guard.require_view_all_audit(token_str)
+        return self._audit_reader.get_sessions(user_id)
+
+    def get_admin_audit_tasks(
+        self, token_str: str, user_id: str, session_id: str
+    ) -> list[str]:
+        """Return task/request IDs for session sorted newest first (ADMIN only)."""
+        self._audit_guard.require_view_all_audit(token_str)
+        return self._audit_reader.get_tasks(user_id, session_id)
+
+    def get_admin_audit_live_feed(self, token_str: str, limit: int = 50) -> str:
+        """Return formatted markdown feed of the most recent audit events (ADMIN only)."""
+        self._audit_guard.require_view_all_audit(token_str)
+        events = self._audit_reader.read_all_events()
+        if not events:
+            return "*No audit events recorded yet.*"
+        recent = events[-limit:]
+        recent.reverse()
+        lines = [
+            "| Time | User | Event | Component | Summary |",
+            "|---|---|---|---|---|",
+        ]
+        for ev in recent:
+            ts = ev.get("timestamp", "")
+            if "T" in ts:
+                ts = ts.split("T")[1][:8]
+            u = ev.get("user_id") or "-"
+            et = ev.get("event_type", "-")
+            comp = ev.get("component", "-")
+            summ = ev.get("summary", "-")
+            lines.append(f"| `{ts}` | **{u}** | `{et}` | `{comp}` | {summ} |")
+        return "\n".join(lines)
 
     def get_admin_network(self, token_str: str) -> dict[str, Any]:
         """Return network monitoring summary and observations (ADMIN only)."""

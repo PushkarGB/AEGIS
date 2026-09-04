@@ -180,7 +180,7 @@ class RouterAgentRuntime(AgentRuntime):
         )
         try:
             result = provider.generate(request)
-        except Exception:
+        except Exception as exc:
             self._emit(
                 event_context,
                 ExecutionEventType.MODEL_INVOKED,
@@ -188,8 +188,25 @@ class RouterAgentRuntime(AgentRuntime):
                 f"Model invocation failed for {routing.model_id}.",
                 model_id=routing.model_id,
                 model_provider_id=routing.provider_id,
+                metadata={
+                    "prompt": request.prompt,
+                    "system_prompt": request.system_prompt,
+                    "model_prompt": request.prompt,
+                    "role": routing.role,
+                    "task_type": task_type,
+                    "error": str(exc),
+                },
             )
             raise
+        raw_model_response: object
+        try:
+            raw_model_response = json.loads(result.text)
+        except Exception:
+            try:
+                raw_model_response = json.loads(self._extract_json_text(result.text))
+            except Exception:
+                raw_model_response = result.text
+
         self._emit(
             event_context,
             ExecutionEventType.MODEL_INVOKED,
@@ -197,6 +214,14 @@ class RouterAgentRuntime(AgentRuntime):
             f"Model invocation completed for {routing.model_id}.",
             model_id=routing.model_id,
             model_provider_id=routing.provider_id,
+            metadata={
+                "prompt": request.prompt,
+                "system_prompt": request.system_prompt,
+                "model_prompt": request.prompt,
+                "model_raw_response": raw_model_response,
+                "role": routing.role,
+                "task_type": task_type,
+            },
         )
         return self._parse_structured_response(response_model, result.text)
 
@@ -238,9 +263,34 @@ class RouterAgentRuntime(AgentRuntime):
 
     @staticmethod
     def _system_prompt(response_model: type[BaseModel]) -> str:
+        guidance: str
+        if response_model is IntentAnalysisResult:
+            guidance = (
+                "You are the AEGIS intent classifier and workflow orchestrator. "
+                "Classify the user's intent, input modality, and required workflow without guesswork. "
+                "Supported workflows are: 'computation' (for spreadsheet/data calculation), "
+                "'scanned_document_approval' (for PDF/inspection document approval notes), "
+                "and 'multimodal_analysis' (for image inspection). "
+            )
+        elif response_model is ObservationDecision:
+            guidance = (
+                "You are the AEGIS runtime reasoner evaluating execution observations during governed workflows. "
+                "Evaluate the current task state and error observations. "
+                "Directives: 'retry_correct' (propose code correction if sandbox failed), "
+                "'continue' (proceed to next step if action succeeded), "
+                "'finish' (complete when goal is fulfilled), "
+                "'request_human_confirmation' (when operator approval is required). "
+            )
+        elif response_model is PlanProposal:
+            guidance = (
+                "You are the AEGIS planning agent. "
+                "Propose an ordered sequence of governed workflow steps based on the user goal. "
+            )
+        else:
+            guidance = "You are the AEGIS prototype agent. "
+
         return (
-            "You are the AEGIS prototype agent. "
-            "Return JSON only, with no markdown and no chain-of-thought. "
+            f"{guidance}Return JSON only, with no markdown fences, no explanatory text, and no chain-of-thought. "
             f"The response must validate against this schema: {json.dumps(response_model.model_json_schema(), sort_keys=True)}"
         )
 
@@ -250,10 +300,30 @@ class RouterAgentRuntime(AgentRuntime):
         payload: BaseModel,
         response_model: type[BaseModel],
     ) -> str:
+        if isinstance(payload, ObservationReasoningRequest):
+            payload_data = payload.model_dump(mode="json")
+            task_state_dict = payload_data.get("task_state", {})
+            obs_list = task_state_dict.get("observations", [])
+            if len(obs_list) > 3:
+                trimmed_obs = []
+                for i, o in enumerate(obs_list):
+                    if i < len(obs_list) - 3:
+                        trimmed_obs.append({
+                            "source": o.get("source"),
+                            "kind": o.get("kind"),
+                            "summary": o.get("summary"),
+                        })
+                    else:
+                        trimmed_obs.append(o)
+                task_state_dict["observations"] = trimmed_obs
+            payload_str = json.dumps(payload_data, indent=2)
+        else:
+            payload_str = payload.model_dump_json(indent=2)
+
         return (
             f"{instruction}\n\n"
             "Request payload:\n"
-            f"{payload.model_dump_json(indent=2)}\n\n"
+            f"{payload_str}\n\n"
             "Return a JSON object that matches this schema exactly:\n"
             f"{json.dumps(response_model.model_json_schema(), indent=2, sort_keys=True)}"
         )
